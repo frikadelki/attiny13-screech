@@ -4,10 +4,11 @@
 #include "../m-toolbox/InputPin.h"
 #include "../m-toolbox/OutputPin.h"
 
+#include <avr/pgmspace.h>
+
 // -------- NOTES DATA --------
 
-// TODO: move to PROGMEM
-const uint8_t NOTES_DIVISIONS[] = {
+const uint8_t NOTES_DIVISIONS[] PROGMEM = {
         255, //D1
         245, //A4
         230, //B5
@@ -139,7 +140,7 @@ private:
     void updateNote() {
         cli();
 
-        uint8_t divisions = NOTES_DIVISIONS[activeNote];
+        uint8_t divisions = pgm_read_byte(&(NOTES_DIVISIONS[activeNote]));
         divisions = divisions > 0 ? divisions : 1;
         ACCESS_BYTE(OCR0A) = divisions;
         ACCESS_BYTE(OCR0B) = divisions / 2;
