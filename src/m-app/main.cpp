@@ -33,21 +33,28 @@ const uint8_t NOTES_COUNT = sizeof(NOTES_DIVISIONS) / sizeof(uint8_t);
 
 // -------- WAVEFORM DATA --------
 
-// TODO: move to PROGMEM
-const uint8_t WAVEFORMS[] = {
-        0b0000,
-        0b0001,
-        0b0011,
-        0b0101,
-        0b1001,
-        0b0111,
-        0b1011,
-        0b1111,
+const uint8_t WAVEFORMS[] PROGMEM = {
+        0b00000000,
+
+        0b11000000,
+        0b11110000,
+        0b11111100,
+        0b11111111,
+
+        0b10001000,
+        0b11001100,
+        0b11101110,
+
+        0b11110010,
+        0b11110001,
+
+        0b10010010,
+        0b10101010,
 };
 
 const uint8_t WAVEFORMS_COUNT = sizeof(WAVEFORMS) / sizeof(uint8_t);
 
-const uint8_t WAVEFORM_LENGTH = 4u;
+const uint8_t WAVEFORM_LENGTH = 8u;
 
 // ----------------
 
@@ -157,7 +164,7 @@ private:
             activeWaveform = (activeWaveform + 1) % WAVEFORMS_COUNT;
         }
 
-        _delay_ms(5);
+        _delay_ms(10);
     }
 
     void updateNote() {
@@ -201,8 +208,9 @@ public:
             return;
         }
 
-        const bool wv = static_cast<uint8_t>(WAVEFORMS[activeWaveform] >> waveformCycleStep) & 0b1u;
-        blinkerPin.set(wv);
+        const uint8_t waveform = pgm_read_byte(&(WAVEFORMS[activeWaveform]));
+        const bool wfBit = static_cast<uint8_t>(waveform >> waveformCycleStep) & 0b1u;
+        blinkerPin.set(wfBit);
 
         waveformCycleStep++;
         const uint8_t stepDivisions = waveformStepDivisions();
@@ -246,10 +254,6 @@ int main() {
 
     // set timer counter mode to CTC
     SET_BYTE_BIT(TCCR0A, WGM01);
-
-    // set test frequency and waveform
-    //ACCESS_BYTE(OCR0A) = 255u;
-    //ACCESS_BYTE(OCR0B) = 191u;
 
     // enable compa & compb interrupts
     ACCESS_BYTE(TIMSK0) |= BIT_MASK(OCIE0A) | BIT_MASK(OCIE0B);
