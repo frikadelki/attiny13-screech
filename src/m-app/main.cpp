@@ -31,6 +31,26 @@ const uint8_t NOTES_COUNT = sizeof(NOTES_DIVISIONS) / sizeof(uint8_t);
 
 // ----------------
 
+// -------- WAVEFORM DATA --------
+
+// TODO: move to PROGMEM
+const uint8_t WAVEFORMS[] = {
+        0b0000,
+        0b0001,
+        0b0011,
+        0b0101,
+        0b1001,
+        0b0111,
+        0b1011,
+        0b1111,
+};
+
+const uint8_t WAVEFORMS_COUNT = sizeof(WAVEFORMS) / sizeof(uint8_t);
+
+const uint8_t WAVEFORM_LENGTH = 4u;
+
+// ----------------
+
 // -------- INPUT HANDLER --------
 
 static const uint8_t INPUT_FILTER_MAX = 0b1111u;
@@ -122,16 +142,19 @@ private:
 
     uint8_t activeNote = 0;
 
+    uint8_t activeWaveform = 0;
+
+    uint8_t waveformCycleStep = 0;
+
     void cycle() {
         inputHandler.readAndFilterInput();
 
-        if (inputHandler.isRisingEdge(InputBtnL) && activeNote > 0) {
-            activeNote--;
+        if (inputHandler.isRisingEdge(InputBtnL)) {
+            activeNote = (activeNote + 1) % NOTES_COUNT;
             updateNote();
         }
-        if (inputHandler.isRisingEdge(InputBtnR) && activeNote < NOTES_COUNT - 1) {
-            activeNote++;
-            updateNote();
+        if (inputHandler.isRisingEdge(InputBtnR)) {
+            activeWaveform = (activeWaveform + 1) % WAVEFORMS_COUNT;
         }
 
         _delay_ms(5);
@@ -143,7 +166,12 @@ private:
         uint8_t divisions = pgm_read_byte(&(NOTES_DIVISIONS[activeNote]));
         divisions = divisions > 0 ? divisions : 1;
         ACCESS_BYTE(OCR0A) = divisions;
-        ACCESS_BYTE(OCR0B) = divisions / 2;
+
+        onWaveformCycleEnd();
+
+        // clear any pending timer interrupts and restart timer fom zero
+        ACCESS_BYTE(TIFR0) = BIT_MASK(OCF0B) | BIT_MASK(OCF0A) | BIT_MASK(TOV0);
+        ACCESS_BYTE(TCNT0) = 0;
 
         sei();
     }
@@ -163,12 +191,34 @@ public:
 #pragma clang diagnostic pop
     }
 
+    uint8_t waveformStepDivisions() {
+        return ACCESS_BYTE(OCR0A) / (WAVEFORM_LENGTH + 1);
+    }
+
     void onWaveformCycleStep() {
-        blinkerPin.set();
+        // this actually should never happen
+        if (waveformCycleStep >= WAVEFORM_LENGTH) {
+            return;
+        }
+
+        const bool wv = static_cast<uint8_t>(WAVEFORMS[activeWaveform] >> waveformCycleStep) & 0b1u;
+        blinkerPin.set(wv);
+
+        waveformCycleStep++;
+        const uint8_t stepDivisions = waveformStepDivisions();
+        const uint8_t nextWaveformStepDivisions = ACCESS_BYTE(OCR0B) + (stepDivisions > 0 ? stepDivisions : 1);
+        const bool hasRemainingWaveformBits = waveformCycleStep < WAVEFORM_LENGTH;
+        const bool hasRemainingDivisions = nextWaveformStepDivisions < ACCESS_BYTE(OCR0A);
+        if (hasRemainingWaveformBits && hasRemainingDivisions) {
+            ACCESS_BYTE(OCR0B) = nextWaveformStepDivisions;
+        }
     }
 
     void onWaveformCycleEnd() {
         blinkerPin.clear();
+
+        waveformCycleStep = 0;
+        ACCESS_BYTE(OCR0B) = waveformStepDivisions();
     }
 };
 
