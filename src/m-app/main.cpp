@@ -36,17 +36,14 @@ const uint8_t NOTES_COUNT = sizeof(NOTES_DIVISIONS) / sizeof(uint8_t);
 const uint8_t WAVEFORMS[] PROGMEM = {
         0b00000000,
 
-        0b11000000,
+        0b10000000,
         0b11110000,
         0b11111100,
-        0b11111111,
 
         0b10001000,
         0b11001100,
-        0b11101110,
 
         0b11110010,
-        0b11110001,
 
         0b10010010,
         0b10101010,
@@ -164,7 +161,7 @@ private:
             activeWaveform = (activeWaveform + 1) % WAVEFORMS_COUNT;
         }
 
-        _delay_ms(10);
+        _delay_ms(7);
     }
 
     void updateNote() {

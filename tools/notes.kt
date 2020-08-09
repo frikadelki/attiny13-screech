@@ -266,7 +266,7 @@ fun printNote(noteInfo: NoteInfo, fullInfo: Boolean = false) {
     }
     val divisions = divisionsForNote(noteInfo.frequency)
     if (fullInfo) {
-        println("${noteInfo.name}: ${noteInfo.frequency}Hz\t\t$divisions -- ${divisions.toDouble() / 4.0}")
+        println("${noteInfo.name}: ${noteInfo.frequency}Hz\t\t$divisions -- ${divisions.toDouble() / 9.0}")
     } else {
         println("$divisions, //${noteInfo.name}")
     }
