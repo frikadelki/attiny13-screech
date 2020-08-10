@@ -166,6 +166,21 @@ private:
 
     bool inputRisingEdge[2] = { false, false };
 
+    static void filter(const bool isOn, uint8_t& value, bool& edge) {
+        if (isOn) {
+            if (value < INPUT_FILTER_MAX) {
+                value++;
+                if (value == INPUT_FILTER_MAX) {
+                    edge = true;
+                }
+            }
+        } else {
+            if (value > 0) {
+                value--;
+            }
+        }
+    }
+
 public:
     InputHandler() = default;
 
@@ -174,37 +189,15 @@ public:
         inputRisingEdge[InputBtnR] = false;
 
         uint8_t filterL = inputFilter >> INPUT_FILTER_NIBBLE_SIZE;
-        if (inputL.read()) {
-            if (filterL < INPUT_FILTER_MAX) {
-                filterL++;
-                if (filterL == INPUT_FILTER_MAX) {
-                    inputRisingEdge[InputBtnL] = true;
-                }
-            }
-        } else {
-            if (filterL > 0) {
-                filterL--;
-            }
-        }
+        filter(inputL.read(), filterL, inputRisingEdge[InputBtnL]);
 
         uint8_t filterR = inputFilter & INPUT_FILTER_MAX;
-        if (inputR.read()) {
-            if (filterR < INPUT_FILTER_MAX) {
-                filterR++;
-                if (filterR == INPUT_FILTER_MAX) {
-                    inputRisingEdge[InputBtnR] = true;
-                }
-            }
-        } else {
-            if (filterR > 0) {
-                filterR--;
-            }
-        }
+        filter(inputR.read(), filterR, inputRisingEdge[InputBtnR]);
 
         inputFilter = static_cast<uint8_t>(filterL << INPUT_FILTER_NIBBLE_SIZE) | filterR;
     }
 
-    bool isRisingEdge(InputBtn button) {
+    bool isRisingEdge(const InputBtn button) {
         return inputRisingEdge[button];
     }
 
