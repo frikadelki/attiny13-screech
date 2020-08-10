@@ -28,6 +28,20 @@ const uint8_t NOTES_DIVISIONS[] PROGMEM = {
 
 const uint8_t NOTES_COUNT = sizeof(NOTES_DIVISIONS) / sizeof(uint8_t);
 
+class NotesSource {
+private:
+    uint8_t activeNoteIndex = 0;
+
+public:
+    void nextNote() {
+        activeNoteIndex = (activeNoteIndex + 1) % NOTES_COUNT;
+    }
+
+    uint8_t activeNoteDivisions() {
+        return pgm_read_byte(&(NOTES_DIVISIONS[activeNoteIndex]));
+    }
+};
+
 // ----------------
 
 // -------- WAVEFORM DATA --------
@@ -52,6 +66,20 @@ const uint8_t WAVEFORMS[] PROGMEM = {
 
 const uint8_t WAVEFORMS_COUNT = sizeof(WAVEFORMS) / sizeof(uint8_t);
 
+class WaveformsSource {
+private:
+    uint8_t activeWaveformIndex = 0;
+
+public:
+    void nextWaveform() {
+        activeWaveformIndex = (activeWaveformIndex + 1) % WAVEFORMS_COUNT;
+    }
+
+    uint8_t activeWaveform() {
+        return pgm_read_byte(&(WAVEFORMS[activeWaveformIndex]));
+    }
+};
+
 // ----------------
 
 // -------- WAVEFORM GEN --------
@@ -61,9 +89,9 @@ class WaveformGenerator {
 private:
     OutputPin<DDRB, PORTB, PINB, 0> blinkerPin;
 
-    uint8_t noteIndex = 0;
+    NotesSource notesSource;
 
-    uint8_t waveformIndex = 0;
+    WaveformsSource waveformsSource;
 
     uint8_t waveformStep = 0;
 
@@ -92,18 +120,18 @@ public:
     }
 
     void nextNote() {
-        noteIndex = (noteIndex + 1) % NOTES_COUNT;
+        notesSource.nextNote();
         updateNote();
     }
 
     void nextWaveform() {
-        waveformIndex = (waveformIndex + 1) % WAVEFORMS_COUNT;
+        waveformsSource.nextWaveform();
     }
 
     void updateNote() {
         cli();
 
-        uint8_t divisions = pgm_read_byte(&(NOTES_DIVISIONS[noteIndex]));
+        uint8_t divisions = notesSource.activeNoteDivisions();
         divisions = divisions > 0 ? divisions : 1;
         ACCESS_BYTE(OCR0A) = divisions;
 
@@ -122,7 +150,7 @@ public:
             return;
         }
 
-        const uint8_t waveform = pgm_read_byte(&(WAVEFORMS[waveformIndex]));
+        const uint8_t waveform = waveformsSource.activeWaveform();
         const bool wfBit = static_cast<uint8_t>(waveform >> waveformStep) & 0b1u;
         blinkerPin.set(wfBit);
 
