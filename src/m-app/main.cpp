@@ -1,9 +1,8 @@
-#include <util/delay.h>
-
 #include "../m-toolbox/Macro.h"
 #include "../m-toolbox/InputPin.h"
 #include "../m-toolbox/OutputPin.h"
 
+#include <util/delay.h>
 #include <avr/pgmspace.h>
 
 // -------- NOTES DATA --------
@@ -33,6 +32,8 @@ const uint8_t NOTES_COUNT = sizeof(NOTES_DIVISIONS) / sizeof(uint8_t);
 
 // -------- WAVEFORM DATA --------
 
+const uint8_t WAVEFORM_LENGTH = 8u;
+
 const uint8_t WAVEFORMS[] PROGMEM = {
         0b00000000,
 
@@ -51,7 +52,97 @@ const uint8_t WAVEFORMS[] PROGMEM = {
 
 const uint8_t WAVEFORMS_COUNT = sizeof(WAVEFORMS) / sizeof(uint8_t);
 
-const uint8_t WAVEFORM_LENGTH = 8u;
+// ----------------
+
+// -------- WAVEFORM GEN --------
+
+// active note divisions stored in OCR0A
+class WaveformGenerator {
+private:
+    OutputPin<DDRB, PORTB, PINB, 0> blinkerPin;
+
+    uint8_t noteIndex = 0;
+
+    uint8_t waveformIndex = 0;
+
+    uint8_t waveformStep = 0;
+
+    uint8_t waveformStepDivisions() {
+        return ACCESS_BYTE(OCR0A) / (WAVEFORM_LENGTH + 1);
+    }
+
+public:
+    WaveformGenerator() {
+        blinkerPin.clear();
+
+        // -------- configuring timer --------
+
+        // set timer counter mode to CTC
+        SET_BYTE_BIT(TCCR0A, WGM01);
+
+        // enable compa & compb interrupts
+        ACCESS_BYTE(TIMSK0) |= BIT_MASK(OCIE0A) | BIT_MASK(OCIE0B);
+
+        // set pre-scaler to 1024 and start timer
+        ACCESS_BYTE(TCCR0B) |= BIT_MASK(CS02) | BIT_MASK(CS00);
+
+        // ----------------
+
+        updateNote();
+    }
+
+    void nextNote() {
+        noteIndex = (noteIndex + 1) % NOTES_COUNT;
+        updateNote();
+    }
+
+    void nextWaveform() {
+        waveformIndex = (waveformIndex + 1) % WAVEFORMS_COUNT;
+    }
+
+    void updateNote() {
+        cli();
+
+        uint8_t divisions = pgm_read_byte(&(NOTES_DIVISIONS[noteIndex]));
+        divisions = divisions > 0 ? divisions : 1;
+        ACCESS_BYTE(OCR0A) = divisions;
+
+        onEnd();
+
+        // clear any pending timer interrupts and restart timer fom zero
+        ACCESS_BYTE(TIFR0) = BIT_MASK(OCF0B) | BIT_MASK(OCF0A) | BIT_MASK(TOV0);
+        ACCESS_BYTE(TCNT0) = 0;
+
+        sei();
+    }
+
+    void onStep() {
+        // this actually should never happen
+        if (waveformStep >= WAVEFORM_LENGTH) {
+            return;
+        }
+
+        const uint8_t waveform = pgm_read_byte(&(WAVEFORMS[waveformIndex]));
+        const bool wfBit = static_cast<uint8_t>(waveform >> waveformStep) & 0b1u;
+        blinkerPin.set(wfBit);
+
+        waveformStep++;
+        const uint8_t stepDivisions = waveformStepDivisions();
+        const uint8_t nextWaveformStepDivisions = ACCESS_BYTE(OCR0B) + (stepDivisions > 0 ? stepDivisions : 1);
+        const bool hasRemainingWaveformBits = waveformStep < WAVEFORM_LENGTH;
+        const bool hasRemainingDivisions = nextWaveformStepDivisions < ACCESS_BYTE(OCR0A);
+        if (hasRemainingWaveformBits && hasRemainingDivisions) {
+            ACCESS_BYTE(OCR0B) = nextWaveformStepDivisions;
+        }
+    }
+
+    void onEnd() {
+        blinkerPin.clear();
+
+        waveformStep = 0;
+        ACCESS_BYTE(OCR0B) = waveformStepDivisions();
+    }
+};
 
 // ----------------
 
@@ -140,51 +231,25 @@ public:
 
 class Main {
 private:
-    OutputPin<DDRB, PORTB, PINB, 0> blinkerPin;
-
     InputHandler inputHandler;
 
-    uint8_t activeNote = 0;
-
-    uint8_t activeWaveform = 0;
-
-    uint8_t waveformCycleStep = 0;
+    WaveformGenerator waveformGenerator;
 
     void cycle() {
         inputHandler.readAndFilterInput();
 
         if (inputHandler.isRisingEdge(InputBtnL)) {
-            activeNote = (activeNote + 1) % NOTES_COUNT;
-            updateNote();
+            waveformGenerator.nextNote();
         }
         if (inputHandler.isRisingEdge(InputBtnR)) {
-            activeWaveform = (activeWaveform + 1) % WAVEFORMS_COUNT;
+            waveformGenerator.nextWaveform();
         }
 
         _delay_ms(7);
     }
 
-    void updateNote() {
-        cli();
-
-        uint8_t divisions = pgm_read_byte(&(NOTES_DIVISIONS[activeNote]));
-        divisions = divisions > 0 ? divisions : 1;
-        ACCESS_BYTE(OCR0A) = divisions;
-
-        onWaveformCycleEnd();
-
-        // clear any pending timer interrupts and restart timer fom zero
-        ACCESS_BYTE(TIFR0) = BIT_MASK(OCF0B) | BIT_MASK(OCF0A) | BIT_MASK(TOV0);
-        ACCESS_BYTE(TCNT0) = 0;
-
-        sei();
-    }
-
 public:
-    Main() {
-        blinkerPin.clear();
-        updateNote();
-    }
+    Main() = default;
 
     void run() {
 #pragma clang diagnostic push
@@ -195,35 +260,12 @@ public:
 #pragma clang diagnostic pop
     }
 
-    uint8_t waveformStepDivisions() {
-        return ACCESS_BYTE(OCR0A) / (WAVEFORM_LENGTH + 1);
-    }
-
     void onWaveformCycleStep() {
-        // this actually should never happen
-        if (waveformCycleStep >= WAVEFORM_LENGTH) {
-            return;
-        }
-
-        const uint8_t waveform = pgm_read_byte(&(WAVEFORMS[activeWaveform]));
-        const bool wfBit = static_cast<uint8_t>(waveform >> waveformCycleStep) & 0b1u;
-        blinkerPin.set(wfBit);
-
-        waveformCycleStep++;
-        const uint8_t stepDivisions = waveformStepDivisions();
-        const uint8_t nextWaveformStepDivisions = ACCESS_BYTE(OCR0B) + (stepDivisions > 0 ? stepDivisions : 1);
-        const bool hasRemainingWaveformBits = waveformCycleStep < WAVEFORM_LENGTH;
-        const bool hasRemainingDivisions = nextWaveformStepDivisions < ACCESS_BYTE(OCR0A);
-        if (hasRemainingWaveformBits && hasRemainingDivisions) {
-            ACCESS_BYTE(OCR0B) = nextWaveformStepDivisions;
-        }
+        waveformGenerator.onStep();
     }
 
     void onWaveformCycleEnd() {
-        blinkerPin.clear();
-
-        waveformCycleStep = 0;
-        ACCESS_BYTE(OCR0B) = waveformStepDivisions();
+        waveformGenerator.onEnd();
     }
 };
 
@@ -246,19 +288,6 @@ int main() {
 
     static Main mainCore;
     _mainCore = &mainCore;
-
-    // -------- configuring timer --------
-
-    // set timer counter mode to CTC
-    SET_BYTE_BIT(TCCR0A, WGM01);
-
-    // enable compa & compb interrupts
-    ACCESS_BYTE(TIMSK0) |= BIT_MASK(OCIE0A) | BIT_MASK(OCIE0B);
-
-    // set pre-scaler to 1024 and start timer
-    ACCESS_BYTE(TCCR0B) |= BIT_MASK(CS02) | BIT_MASK(CS00);
-
-    // ----------------
 
     sei();
 
