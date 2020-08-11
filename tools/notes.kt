@@ -268,7 +268,7 @@ fun printNote(noteInfo: NoteInfo, fullInfo: Boolean = false) {
     if (fullInfo) {
         println("${noteInfo.name}: ${noteInfo.frequency}Hz\t\t$divisions -- ${divisions.toDouble() / 9.0}")
     } else {
-        println("$divisions, //${noteInfo.name}")
+        println("$divisions, \t\t//${noteInfo.name}")
     }
 }
 
@@ -308,6 +308,24 @@ fun main() {
             "A8",
             "B8",
             "C8"
+    )
+
+    val printNotes4 = listOf(
+            "C6",
+            "D6",
+            "E6",
+            "F6",
+            "G6",
+            "A6",
+            "B6",
+
+            "C7",
+            "D7",
+            "E7",
+            "F7",
+            "G7",
+            "A7",
+            "B7",
     )
 
     println("_NMINF: $NOTE_MIN_FREQUENCY")

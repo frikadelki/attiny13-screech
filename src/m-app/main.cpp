@@ -8,39 +8,29 @@
 // -------- NOTES DATA --------
 
 const uint8_t NOTES_DIVISIONS[] PROGMEM = {
-        255, //D1
-        245, //A4
-        230, //B5
-        200, //C6
-        181, //F6
-        171, //G6
-        161, //A7
-        149, //B7
-        143, //C7
-        129, //D7
-        113, //E7
-        104, //F7
-        86, //G7
-        65, //A8
-        41, //B8
-        28, //C8
+        255,
+        200, 		//C6    //0x1
+        193, 		//D6    //0x2
+        185, 		//E6    //0x3
+        181, 		//F6    //0x4
+        171, 		//G6    //0x5
+        209, 		//A6    //0x6
+        203, 		//B6    //0x7
+        143, 		//C7    //0x8
+        129, 		//D7    //0x9
+        113, 		//E7    //0xA
+        104, 		//F7    //0xB
+        86, 		//G7    //0xC
+        161, 		//A7    //0xD
+        149, 		//B7    //0xE
+        255
 };
 
 const uint8_t NOTES_COUNT = sizeof(NOTES_DIVISIONS) / sizeof(uint8_t);
 
-class NotesSource {
-private:
-    uint8_t activeNoteIndex = 0;
-
-public:
-    void nextNote() {
-        activeNoteIndex = (activeNoteIndex + 1) % NOTES_COUNT;
-    }
-
-    uint8_t activeNoteDivisions() {
-        return pgm_read_byte(&(NOTES_DIVISIONS[activeNoteIndex]));
-    }
-};
+uint8_t readNoteDivisions(const uint8_t noteIndex) {
+    return pgm_read_byte(&(NOTES_DIVISIONS[noteIndex % NOTES_COUNT]));
+}
 
 // ----------------
 
@@ -66,23 +56,27 @@ const uint8_t WAVEFORMS[] PROGMEM = {
 
 const uint8_t WAVEFORMS_COUNT = sizeof(WAVEFORMS) / sizeof(uint8_t);
 
-class WaveformsSource {
-private:
-    uint8_t activeWaveformIndex = 0;
-
-public:
-    void nextWaveform() {
-        activeWaveformIndex = (activeWaveformIndex + 1) % WAVEFORMS_COUNT;
-    }
-
-    uint8_t activeWaveform() {
-        return pgm_read_byte(&(WAVEFORMS[activeWaveformIndex]));
-    }
-};
+uint8_t readWaveform(const uint8_t waveformIndex) {
+    return pgm_read_byte(&(WAVEFORMS[waveformIndex % WAVEFORMS_COUNT]));
+}
 
 // ----------------
 
 // -------- WAVEFORM GEN --------
+
+typedef struct NoteInfo {
+    const uint8_t noteDivisions;
+    const uint8_t waveform;
+} NoteInfo;
+
+class NotesSequence {
+public:
+    virtual NoteInfo nextNote() = 0;
+};
+
+const uint16_t TIMER_COUNTS_IN_SECOND = 9500;
+
+const uint16_t TIMER_COUNTS_PER_BEAT = TIMER_COUNTS_IN_SECOND / 8;
 
 // active note divisions stored in OCR0A
 class WaveformGenerator {
@@ -97,8 +91,13 @@ private:
 
     uint8_t nextNoteWaveform = 0;
 
+    NotesSequence &notesSequence;
+
+    uint16_t timeCounter = 0;
+
 public:
-    WaveformGenerator() {
+    explicit WaveformGenerator(NotesSequence &notesSequence) :
+        notesSequence(notesSequence) {
         cli();
 
         blinkerPin.clear();
@@ -116,11 +115,6 @@ public:
         ACCESS_BYTE(TCCR0B) |= BIT_MASK(CS02) | BIT_MASK(CS00);
 
         sei();
-    }
-
-    void setNote(const uint8_t newNoteDivisions, const uint8_t newWaveform) {
-        nextNoteDivisions = newNoteDivisions;
-        nextNoteWaveform = newWaveform;
     }
 
 // these are only public because they are interrupt callbacks
@@ -146,6 +140,15 @@ public:
     }
 
     void onEnd() {
+        timeCounter += ACCESS_BYTE(OCR0A);
+        if (timeCounter >= TIMER_COUNTS_PER_BEAT) {
+            timeCounter -= TIMER_COUNTS_PER_BEAT;
+
+            NoteInfo note = notesSequence.nextNote();
+            nextNoteDivisions = note.noteDivisions;
+            nextNoteWaveform = note.waveform;
+        }
+
         blinkerPin.clear();
 
         waveformStep = 0;
@@ -243,20 +246,100 @@ public:
 
 // -------- MAIN --------
 
+class ActiveNoteNotesSequence : public NotesSequence {
+private:
+    uint8_t activeNoteIndex = 0;
+
+    uint8_t  activeWaveformIndex = 0;
+
+public:
+    void advanceNote() {
+        activeNoteIndex++;
+    }
+
+    void advanceWaveform() {
+        activeWaveformIndex++;
+    }
+
+    NoteInfo nextNote() final {
+        const uint8_t noteDivisions = readNoteDivisions(activeNoteIndex);
+        const uint8_t noteWaveform = readWaveform(activeWaveformIndex);
+        return NoteInfo { noteDivisions, noteWaveform };
+    }
+};
+
+class AutoNotesSequence : public NotesSequence {
+    uint8_t activeNoteIndex = 0;
+
+    uint8_t  activeWaveformIndex = 0;
+
+public:
+    void advanceWaveform() {
+        activeWaveformIndex++;
+    }
+
+    NoteInfo nextNote() final {
+        const uint8_t noteDivisions = readNoteDivisions(activeNoteIndex++);
+        const uint8_t noteWaveform = readWaveform(activeWaveformIndex);
+        return NoteInfo { noteDivisions, noteWaveform };
+    }
+};
+
+const uint8_t _SAMPLE_MELODY_0_POINTS[] PROGMEM = {
+        0xAA, 0x0A, 0x08, 0xA0,
+        0xC0, 0x00, 0x50, 0x00,
+        0x80, 0x05, 0x00, 0x30,
+        0x06, 0x07, 0x06, 0x60,
+
+        0x00, 0x00, 0x00, 0x00,
+};
+
+const uint8_t _SAMPLE_MELODY_0_POINTS_COUNT = sizeof(_SAMPLE_MELODY_0_POINTS) / sizeof(uint8_t);
+
+// 1 point is 2 4-bit notes indices in NOTES_DIVISIONS array
+const uint8_t _SAMPLE_MELODY_0_NOTES_COUNT = _SAMPLE_MELODY_0_POINTS_COUNT * 2;
+
+uint8_t readMelodyPoint(const uint8_t pointIndex) {
+    return pgm_read_byte(&(_SAMPLE_MELODY_0_POINTS[pointIndex % _SAMPLE_MELODY_0_POINTS_COUNT]));
+}
+
+class PainMemoryNotesSequence : public NotesSequence {
+    uint8_t melodyNoteIndex = 0;
+
+    uint8_t  activeWaveformIndex = 0;
+
+public:
+    void advanceWaveform() {
+        activeWaveformIndex++;
+    }
+
+    NoteInfo nextNote() final {
+        const uint8_t point = readMelodyPoint(melodyNoteIndex / 2);
+        uint8_t noteDivisionsIndex;
+        if (0 == melodyNoteIndex % 2) {
+            noteDivisionsIndex = (point >> 4u);
+        } else {
+            noteDivisionsIndex = point & 0b1111u;
+        }
+        melodyNoteIndex++;
+
+        const uint8_t noteDivisions = readNoteDivisions(noteDivisionsIndex);
+        const uint8_t noteWaveform = noteDivisionsIndex > 0 ? readWaveform(activeWaveformIndex) : 0;
+        return NoteInfo { noteDivisions, noteWaveform };
+    }
+};
+
 class Main {
 private:
-    InputHandler inputHandler;
+    ActiveNoteNotesSequence notesSequence;
 
     WaveformGenerator waveformGenerator;
 
-    NotesSource notesSource;
-
-    WaveformsSource waveformsSource;
+    InputHandler inputHandler;
 
 public:
-    Main() {
-        updateWaveformGenerator();
-    };
+    Main() : waveformGenerator(notesSequence) {
+    }
 
     void run() {
 #pragma clang diagnostic push
@@ -272,20 +355,13 @@ private:
         inputHandler.readAndFilterInput();
 
         if (inputHandler.isRisingEdge(InputBtnL)) {
-            notesSource.nextNote();
-            updateWaveformGenerator();
+            notesSequence.advanceNote();
         }
         if (inputHandler.isRisingEdge(InputBtnR)) {
-            waveformsSource.nextWaveform();
-            updateWaveformGenerator();
+            notesSequence.advanceWaveform();
         }
 
         _delay_ms(7);
-    }
-
-    void updateWaveformGenerator() {
-        waveformGenerator.setNote(
-            notesSource.activeNoteDivisions(), waveformsSource.activeWaveform());
     }
 
 // interrupt callbacks
