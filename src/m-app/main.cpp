@@ -89,9 +89,7 @@ class WaveformGenerator {
 private:
     OutputPin<DDRB, PORTB, PINB, 0> blinkerPin;
 
-    NotesSource notesSource;
-
-    WaveformsSource waveformsSource;
+    uint8_t waveform = 0;
 
     uint8_t waveformStep = 0;
 
@@ -99,11 +97,21 @@ private:
         return ACCESS_BYTE(OCR0A) / (WAVEFORM_LENGTH + 1);
     }
 
+    void updateNote(const uint8_t newNoteDivisions, const uint8_t newWaveform) {
+        const uint8_t divisions = newNoteDivisions > 0 ? newNoteDivisions : 1;
+        ACCESS_BYTE(OCR0A) = divisions;
+        waveform = newWaveform;
+
+        onEnd();
+
+        // clear any pending timer interrupts and restart timer fom zero
+        ACCESS_BYTE(TIFR0) = BIT_MASK(OCF0B) | BIT_MASK(OCF0A) | BIT_MASK(TOV0);
+        ACCESS_BYTE(TCNT0) = 0;
+    }
+
 public:
     WaveformGenerator() {
-        blinkerPin.clear();
-
-        // -------- configuring timer --------
+        cli();
 
         // set timer counter mode to CTC
         SET_BYTE_BIT(TCCR0A, WGM01);
@@ -111,46 +119,30 @@ public:
         // enable compa & compb interrupts
         ACCESS_BYTE(TIMSK0) |= BIT_MASK(OCIE0A) | BIT_MASK(OCIE0B);
 
+        // set default params
+        updateNote(255, 0);
+
         // set pre-scaler to 1024 and start timer
         ACCESS_BYTE(TCCR0B) |= BIT_MASK(CS02) | BIT_MASK(CS00);
-
-        // ----------------
-
-        updateNote();
-    }
-
-    void nextNote() {
-        notesSource.nextNote();
-        updateNote();
-    }
-
-    void nextWaveform() {
-        waveformsSource.nextWaveform();
-    }
-
-    void updateNote() {
-        cli();
-
-        uint8_t divisions = notesSource.activeNoteDivisions();
-        divisions = divisions > 0 ? divisions : 1;
-        ACCESS_BYTE(OCR0A) = divisions;
-
-        onEnd();
-
-        // clear any pending timer interrupts and restart timer fom zero
-        ACCESS_BYTE(TIFR0) = BIT_MASK(OCF0B) | BIT_MASK(OCF0A) | BIT_MASK(TOV0);
-        ACCESS_BYTE(TCNT0) = 0;
 
         sei();
     }
 
+    void setNote(const uint8_t newNoteDivisions, const uint8_t newWaveform) {
+        cli();
+        updateNote(newNoteDivisions, newWaveform);
+        sei();
+    }
+
+// these are only public because they are interrupt callbacks
+// maybe we can hide them somehow, we are monopolizing timer after all
+public:
     void onStep() {
         // this actually should never happen
         if (waveformStep >= WAVEFORM_LENGTH) {
             return;
         }
 
-        const uint8_t waveform = waveformsSource.activeWaveform();
         const bool wfBit = static_cast<uint8_t>(waveform >> waveformStep) & 0b1u;
         blinkerPin.set(wfBit);
 
@@ -256,21 +248,14 @@ private:
 
     WaveformGenerator waveformGenerator;
 
-    void cycle() {
-        inputHandler.readAndFilterInput();
+    NotesSource notesSource;
 
-        if (inputHandler.isRisingEdge(InputBtnL)) {
-            waveformGenerator.nextNote();
-        }
-        if (inputHandler.isRisingEdge(InputBtnR)) {
-            waveformGenerator.nextWaveform();
-        }
-
-        _delay_ms(7);
-    }
+    WaveformsSource waveformsSource;
 
 public:
-    Main() = default;
+    Main() {
+        updateWaveformGenerator();
+    };
 
     void run() {
 #pragma clang diagnostic push
@@ -281,6 +266,30 @@ public:
 #pragma clang diagnostic pop
     }
 
+private:
+    void cycle() {
+        inputHandler.readAndFilterInput();
+
+        if (inputHandler.isRisingEdge(InputBtnL)) {
+            notesSource.nextNote();
+            updateWaveformGenerator();
+        }
+        if (inputHandler.isRisingEdge(InputBtnR)) {
+            waveformsSource.nextWaveform();
+            updateWaveformGenerator();
+        }
+
+        _delay_ms(7);
+    }
+
+    void updateWaveformGenerator() {
+        waveformGenerator.setNote(
+                notesSource.activeNoteDivisions(),
+                waveformsSource.activeWaveform());
+    }
+
+// interrupt callbacks
+public:
     void onWaveformCycleStep() {
         waveformGenerator.onStep();
     }
@@ -305,12 +314,8 @@ ISR(TIM0_COMPA_vect) {
 }
 
 int main() {
-    cli();
-
     static Main mainCore;
     _mainCore = &mainCore;
-
-    sei();
 
     mainCore.run();
 }
