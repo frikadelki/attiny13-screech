@@ -93,25 +93,15 @@ private:
 
     uint8_t waveformStep = 0;
 
-    uint8_t waveformStepDivisions() {
-        return ACCESS_BYTE(OCR0A) / (WAVEFORM_LENGTH + 1);
-    }
+    uint8_t nextNoteDivisions = 255;
 
-    void updateNote(const uint8_t newNoteDivisions, const uint8_t newWaveform) {
-        const uint8_t divisions = newNoteDivisions > 0 ? newNoteDivisions : 1;
-        ACCESS_BYTE(OCR0A) = divisions;
-        waveform = newWaveform;
-
-        onEnd();
-
-        // clear any pending timer interrupts and restart timer fom zero
-        ACCESS_BYTE(TIFR0) = BIT_MASK(OCF0B) | BIT_MASK(OCF0A) | BIT_MASK(TOV0);
-        ACCESS_BYTE(TCNT0) = 0;
-    }
+    uint8_t nextNoteWaveform = 0;
 
 public:
     WaveformGenerator() {
         cli();
+
+        blinkerPin.clear();
 
         // set timer counter mode to CTC
         SET_BYTE_BIT(TCCR0A, WGM01);
@@ -119,8 +109,8 @@ public:
         // enable compa & compb interrupts
         ACCESS_BYTE(TIMSK0) |= BIT_MASK(OCIE0A) | BIT_MASK(OCIE0B);
 
-        // set default params
-        updateNote(255, 0);
+        // load default interrupt divisions from 'next*' fields
+        primeTimerDivisions();
 
         // set pre-scaler to 1024 and start timer
         ACCESS_BYTE(TCCR0B) |= BIT_MASK(CS02) | BIT_MASK(CS00);
@@ -129,9 +119,8 @@ public:
     }
 
     void setNote(const uint8_t newNoteDivisions, const uint8_t newWaveform) {
-        cli();
-        updateNote(newNoteDivisions, newWaveform);
-        sei();
+        nextNoteDivisions = newNoteDivisions;
+        nextNoteWaveform = newWaveform;
     }
 
 // these are only public because they are interrupt callbacks
@@ -160,7 +149,19 @@ public:
         blinkerPin.clear();
 
         waveformStep = 0;
+        waveform = nextNoteWaveform;
+
+        primeTimerDivisions();
+    }
+
+private:
+    void primeTimerDivisions() {
+        ACCESS_BYTE(OCR0A) = nextNoteDivisions;
         ACCESS_BYTE(OCR0B) = waveformStepDivisions();
+    }
+
+    uint8_t waveformStepDivisions() {
+        return ACCESS_BYTE(OCR0A) / (WAVEFORM_LENGTH + 1);
     }
 };
 
@@ -284,8 +285,7 @@ private:
 
     void updateWaveformGenerator() {
         waveformGenerator.setNote(
-                notesSource.activeNoteDivisions(),
-                waveformsSource.activeWaveform());
+            notesSource.activeNoteDivisions(), waveformsSource.activeWaveform());
     }
 
 // interrupt callbacks
