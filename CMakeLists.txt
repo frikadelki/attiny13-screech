@@ -48,6 +48,7 @@ set(SOURCE_FILES
 
         src/m-toolbox/InputPin.h
         src/m-toolbox/OutputPin.h
+        src/m-toolbox/ComboPin.h
 
         src/m-app/main.cpp)
 

@@ -7,27 +7,27 @@ template <uint8_t Register, uint8_t Bit>
 class BitAccess {
 public:
     inline __attribute__((always_inline))
-    void set() {
+    static void set() {
         SET_BYTE_BIT(Register, Bit);
     }
 
     inline __attribute__((always_inline))
-    void clear() {
+    static void clear() {
         CLEAR_BYTE_BIT(Register, Bit);
     }
 
     inline __attribute__((always_inline))
-    void set(bool isSet) {
+    static void set(bool isSet) {
         isSet ? set() : clear();
     }
 
     inline __attribute__((always_inline))
-    void set(uint8_t setBit) {
+    static void set(uint8_t setBit) {
         (0 != setBit) ? set() : clear();
     }
 
     inline __attribute__((always_inline))
-    bool isSet() {
+    static bool isSet() {
         return IS_BYTE_BIT_SET(Register, Bit);
     }
 };

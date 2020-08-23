@@ -1,9 +1,26 @@
+
 #include "../m-toolbox/Macro.h"
-#include "../m-toolbox/InputPin.h"
+#include "../m-toolbox/ComboPin.h"
 #include "../m-toolbox/OutputPin.h"
 
 #include <util/delay.h>
 #include <avr/pgmspace.h>
+
+// -------- UTILS --------
+
+namespace divv {
+    uint8_t remainder;
+
+    uint8_t div(uint8_t dividend, const uint8_t divisor) {
+        uint8_t result = 0;
+        while (dividend >= divisor) {
+            dividend -= divisor;
+            result++;
+        }
+        remainder = dividend;
+        return result;
+    }
+}
 
 // -------- NOTES DATA --------
 
@@ -29,7 +46,9 @@ const uint8_t NOTES_DIVISIONS[] PROGMEM = {
 const uint8_t NOTES_COUNT = sizeof(NOTES_DIVISIONS) / sizeof(uint8_t);
 
 uint8_t readNoteDivisions(const uint8_t noteIndex) {
-    return pgm_read_byte(&(NOTES_DIVISIONS[noteIndex % NOTES_COUNT]));
+    divv::div(noteIndex, NOTES_COUNT);
+    const uint8_t indexMod = divv::remainder;
+    return pgm_read_byte(&(NOTES_DIVISIONS[indexMod]));
 }
 
 // ----------------
@@ -57,59 +76,78 @@ const uint8_t WAVEFORMS[] PROGMEM = {
 const uint8_t WAVEFORMS_COUNT = sizeof(WAVEFORMS) / sizeof(uint8_t);
 
 uint8_t readWaveform(const uint8_t waveformIndex) {
-    return pgm_read_byte(&(WAVEFORMS[waveformIndex % WAVEFORMS_COUNT]));
+    divv::div(waveformIndex, WAVEFORMS_COUNT);
+    const uint8_t indexMod = divv::remainder;
+    return pgm_read_byte(&(WAVEFORMS[indexMod]));
 }
 
 // ----------------
 
 // -------- WAVEFORM GEN --------
 
-typedef struct NoteInfo {
-    const uint8_t noteDivisions;
-    const uint8_t waveform;
-} NoteInfo;
-
-class NotesSequence {
+class WaveformGen {
 public:
-    virtual NoteInfo nextNote() = 0;
-};
+    typedef struct NoteInfo {
+        uint8_t noteDivisions;
+        uint8_t waveform;
+    } NoteInfo;
 
-const uint16_t TIMER_COUNTS_IN_SECOND = 9500;
+    typedef NoteInfo (*NotesSequence)();
 
-const uint16_t TIMER_COUNTS_PER_BEAT = TIMER_COUNTS_IN_SECOND / 8;
-
-// active note divisions stored in OCR0A
-class WaveformGenerator {
 private:
-    OutputPin<DDRB, PORTB, PINB, 0> blinkerPin;
+    static const uint16_t TIMER_COUNTS_IN_SECOND = 9500;
 
-    uint8_t waveform = 0;
+    static const uint16_t TIMER_COUNTS_PER_BEAT = TIMER_COUNTS_IN_SECOND / 8;
 
-    uint8_t waveformStep = 0;
+    typedef struct WaveformGeneratorState {
+        NotesSequence notesSequence = nullptr;
 
-    uint8_t nextNoteDivisions = 255;
+        uint16_t timeCounter = 0;
 
-    uint8_t nextNoteWaveform = 0;
+        NoteInfo activeNote = { 255, 0 };
 
-    NotesSequence &notesSequence;
+        uint8_t waveformStep = 0;
+    } WaveformGeneratorState;
 
-    uint16_t timeCounter = 0;
+    typedef OutputPin<DDRB, PORTB, PINB, 0> blinkerPin;
+
+    static WaveformGeneratorState wgs;
+
+    static uint8_t waveformStepDivisions() {
+        return divv::div(wgs.activeNote.noteDivisions, WAVEFORM_LENGTH + 1);
+    }
+
+    static void primeTimers() {
+        ACCESS_BYTE(OCR0A) = wgs.activeNote.noteDivisions;
+        ACCESS_BYTE(OCR0B) = waveformStepDivisions();
+    }
+
+    static void primeNextWavePeriod() {
+        blinkerPin::clear();
+        wgs.waveformStep = 0;
+        primeTimers();
+    }
 
 public:
-    explicit WaveformGenerator(NotesSequence &notesSequence) :
-        notesSequence(notesSequence) {
+    static void wgsRestart(NotesSequence newNotesSequence) {
         cli();
 
-        blinkerPin.clear();
+        blinkerPin::init();
 
         // set timer counter mode to CTC
-        SET_BYTE_BIT(TCCR0A, WGM01);
+        ACCESS_BYTE(TCCR0A) |= BIT_MASK(WGM01);
 
         // enable compa & compb interrupts
         ACCESS_BYTE(TIMSK0) |= BIT_MASK(OCIE0A) | BIT_MASK(OCIE0B);
 
-        // load default interrupt divisions from 'next*' fields
-        primeTimerDivisions();
+        // clear any relevant pending interrupts and reset timer counter
+        ACCESS_BYTE(TIFR0) = BIT_MASK(OCF0B) | BIT_MASK(OCF0A) | BIT_MASK(TOV0);
+        ACCESS_BYTE(TCNT0) = 0;
+
+        wgs.notesSequence = newNotesSequence;
+        wgs.timeCounter = 0;
+        wgs.activeNote = wgs.notesSequence();
+        primeNextWavePeriod();
 
         // set pre-scaler to 1024 and start timer
         ACCESS_BYTE(TCCR0B) |= BIT_MASK(CS02) | BIT_MASK(CS00);
@@ -117,79 +155,74 @@ public:
         sei();
     }
 
-// these are only public because they are interrupt callbacks
-// maybe we can hide them somehow, we are monopolizing timer after all
-public:
-    void onStep() {
-        // this actually should never happen
-        if (waveformStep >= WAVEFORM_LENGTH) {
-            return;
-        }
+    inline __attribute__((always_inline))
+    static void onStep() {
+        const bool wfBit = static_cast<uint8_t>(wgs.activeNote.waveform >> wgs.waveformStep) & 0b1u;
+        blinkerPin::set(wfBit);
 
-        const bool wfBit = static_cast<uint8_t>(waveform >> waveformStep) & 0b1u;
-        blinkerPin.set(wfBit);
-
-        waveformStep++;
+        wgs.waveformStep++;
         const uint8_t stepDivisions = waveformStepDivisions();
         const uint8_t nextWaveformStepDivisions = ACCESS_BYTE(OCR0B) + (stepDivisions > 0 ? stepDivisions : 1);
-        const bool hasRemainingWaveformBits = waveformStep < WAVEFORM_LENGTH;
-        const bool hasRemainingDivisions = nextWaveformStepDivisions < ACCESS_BYTE(OCR0A);
+        const bool hasRemainingWaveformBits = wgs.waveformStep < WAVEFORM_LENGTH;
+        const bool hasRemainingDivisions = nextWaveformStepDivisions < wgs.activeNote.noteDivisions;
         if (hasRemainingWaveformBits && hasRemainingDivisions) {
             ACCESS_BYTE(OCR0B) = nextWaveformStepDivisions;
         }
     }
 
-    void onEnd() {
-        timeCounter += ACCESS_BYTE(OCR0A);
-        if (timeCounter >= TIMER_COUNTS_PER_BEAT) {
-            timeCounter -= TIMER_COUNTS_PER_BEAT;
-
-            NoteInfo note = notesSequence.nextNote();
-            nextNoteDivisions = note.noteDivisions;
-            nextNoteWaveform = note.waveform;
+    inline __attribute__((always_inline))
+    static void onEnd() {
+        wgs.timeCounter += ACCESS_BYTE(OCR0A);
+        if (wgs.timeCounter >= TIMER_COUNTS_PER_BEAT) {
+            wgs.timeCounter -= TIMER_COUNTS_PER_BEAT;
+            wgs.activeNote = wgs.notesSequence();
         }
-
-        blinkerPin.clear();
-
-        waveformStep = 0;
-        waveform = nextNoteWaveform;
-
-        primeTimerDivisions();
-    }
-
-private:
-    void primeTimerDivisions() {
-        ACCESS_BYTE(OCR0A) = nextNoteDivisions;
-        ACCESS_BYTE(OCR0B) = waveformStepDivisions();
-    }
-
-    uint8_t waveformStepDivisions() {
-        return ACCESS_BYTE(OCR0A) / (WAVEFORM_LENGTH + 1);
+        primeNextWavePeriod();
     }
 };
+
+WaveformGen::WaveformGeneratorState WaveformGen::wgs;
+
+ISR(TIM0_COMPB_vect) {
+    WaveformGen::onStep();
+}
+
+ISR(TIM0_COMPA_vect) {
+    WaveformGen::onEnd();
+}
 
 // ----------------
 
 // -------- INPUT HANDLER --------
 
-static const uint8_t INPUT_FILTER_MAX = 0b1111u;
-static const uint8_t INPUT_FILTER_NIBBLE_SIZE = 4u;
+typedef enum InputBtn {
+    InputButtonsCount =  4,
 
-enum InputBtn {
-    InputBtnL = 0,
-    InputBtnR = 1,
-};
+    InputBtnMode =  3,
+    InputBtnMinus = 2,
+    InputBtnClick = 1,
+    InputBtnPlus =  0,
+} InputBtn;
 
 class InputHandler {
 private:
-    InputPin<DDRB, PORTB, PINB, 4> inputL;
+    typedef ComboPin<DDRB, PORTB, PINB, 4> inputMode;
 
-    InputPin<DDRB, PORTB, PINB, 3> inputR;
+    typedef ComboPin<DDRB, PORTB, PINB, 3> inputMinus;
 
-    uint8_t inputFilter = 0;
+    typedef ComboPin<DDRB, PORTB, PINB, 2> inputClick;
 
-    bool inputRisingEdge[2] = { false, false };
+    typedef ComboPin<DDRB, PORTB, PINB, 1> inputPlus;
 
+    static const uint8_t INPUT_FILTER_MASK = 0b1111u;
+
+    static const uint8_t INPUT_FILTER_MAX = INPUT_FILTER_MASK;
+
+    // 7 msb bits are filter value
+    // 0th bit indicates if rising edge was detected during the latest poll
+    uint8_t buttonsState[InputButtonsCount] = { 0, 0, 0, 0 };
+
+    inline __attribute__((always_inline))
     static void filter(const bool isOn, uint8_t& value, bool& edge) {
         if (isOn) {
             if (value < INPUT_FILTER_MAX) {
@@ -199,46 +232,62 @@ private:
                 }
             }
         } else {
-            if (value > 0) {
-                value--;
-            }
+            value = 0;
         }
     }
 
+    void filterButton(const bool isOn, const InputBtn btn) {
+        uint8_t btnFilter = static_cast<uint8_t>(buttonsState[btn] >> 1u) & INPUT_FILTER_MASK;
+        bool edge = false;
+        filter(isOn, btnFilter, edge);
+        buttonsState[btn] = static_cast<uint8_t>(btnFilter << 1u) | edge;
+    }
+
 public:
-    InputHandler() = default;
+#pragma clang diagnostic push
+#pragma ide diagnostic ignored "modernize-use-equals-default"
+    InputHandler() { // NOLINT(hicpp-use-equals-default)
+        // we can skip this and save some instructions because
+        // micro's startup state matches defaults for ComboPin
+        // inputMode::init();
+        // inputMinus::init();
+        // inputClick::init();
+        // inputPlus::init();
+    };
+#pragma clang diagnostic pop
 
-    void readAndFilterInput() {
-        inputRisingEdge[InputBtnL] = false;
-        inputRisingEdge[InputBtnR] = false;
-
-        uint8_t filterL = inputFilter >> INPUT_FILTER_NIBBLE_SIZE;
-        filter(inputL.read(), filterL, inputRisingEdge[InputBtnL]);
-
-        uint8_t filterR = inputFilter & INPUT_FILTER_MAX;
-        filter(inputR.read(), filterR, inputRisingEdge[InputBtnR]);
-
-        inputFilter = static_cast<uint8_t>(filterL << INPUT_FILTER_NIBBLE_SIZE) | filterR;
+    inline __attribute__((always_inline))
+    void pollInputs() {
+        inputMode::inputPrime();
+        inputMinus::inputPrime();
+        inputClick::inputPrime();
+        inputPlus::inputPrime();
+        comboPinWaitInputSettle();
+        filterButton(inputMode::inputRead(), InputBtnMode);
+        filterButton(inputMinus::inputRead(), InputBtnMinus);
+        filterButton(inputClick::inputRead(), InputBtnClick);
+        filterButton(inputPlus::inputRead(), InputBtnPlus);
     }
 
-    bool isRisingEdge(const InputBtn button) {
-        return inputRisingEdge[button];
+    inline __attribute__((always_inline))
+    bool isRisingEdge(const InputBtn btn) {
+        return (buttonsState[btn] & 0b1u);
     }
 
-    bool isInputLHigh() {
-        return INPUT_FILTER_MAX == (inputFilter >> INPUT_FILTER_NIBBLE_SIZE);
+    inline __attribute__((always_inline))
+    void setLEDs(const bool i3, const bool i2, const bool i1, const bool i0) {
+        inputMode::outputSet(i3);
+        inputMinus::outputSet(i2);
+        inputClick::outputSet(i1);
+        inputPlus::outputSet(i0);
     }
 
-    bool isInputLLow() {
-        return 0 == (inputFilter >> INPUT_FILTER_NIBBLE_SIZE);
-    }
-
-    bool isInputRHigh() {
-        return INPUT_FILTER_MAX == (inputFilter & INPUT_FILTER_MAX);
-    }
-
-    bool isInputRLow() {
-        return 0 == (inputFilter & INPUT_FILTER_MAX);
+    void setLEDs(uint8_t val) {
+        setLEDs(
+                static_cast<uint8_t>(val >> 3u) & 1u,
+                static_cast<uint8_t>(val >> 2u) & 1u,
+                static_cast<uint8_t>(val >> 1u) & 1u,
+                static_cast<uint8_t>(val >> 0u) & 1u);
     }
 };
 
@@ -246,13 +295,13 @@ public:
 
 // -------- MAIN --------
 
-class ActiveNoteNotesSequence : public NotesSequence {
-private:
-    uint8_t activeNoteIndex = 0;
+namespace ActiveNoteNotesSequence {
+    namespace {
+        uint8_t activeNoteIndex = 0;
 
-    uint8_t  activeWaveformIndex = 0;
+        uint8_t  activeWaveformIndex = 0;
+    }
 
-public:
     void advanceNote() {
         activeNoteIndex++;
     }
@@ -261,59 +310,65 @@ public:
         activeWaveformIndex++;
     }
 
-    NoteInfo nextNote() final {
+    WaveformGen::NoteInfo nextNote() {
         const uint8_t noteDivisions = readNoteDivisions(activeNoteIndex);
         const uint8_t noteWaveform = readWaveform(activeWaveformIndex);
-        return NoteInfo { noteDivisions, noteWaveform };
+        return WaveformGen::NoteInfo { noteDivisions, noteWaveform };
     }
-};
-
-class AutoNotesSequence : public NotesSequence {
-    uint8_t activeNoteIndex = 0;
-
-    uint8_t  activeWaveformIndex = 0;
-
-public:
-    void advanceWaveform() {
-        activeWaveformIndex++;
-    }
-
-    NoteInfo nextNote() final {
-        const uint8_t noteDivisions = readNoteDivisions(activeNoteIndex++);
-        const uint8_t noteWaveform = readWaveform(activeWaveformIndex);
-        return NoteInfo { noteDivisions, noteWaveform };
-    }
-};
-
-const uint8_t _SAMPLE_MELODY_0_POINTS[] PROGMEM = {
-        0xAA, 0x0A, 0x08, 0xA0,
-        0xC0, 0x00, 0x50, 0x00,
-        0x80, 0x05, 0x00, 0x30,
-        0x06, 0x07, 0x06, 0x60,
-
-        0x00, 0x00, 0x00, 0x00,
-};
-
-const uint8_t _SAMPLE_MELODY_0_POINTS_COUNT = sizeof(_SAMPLE_MELODY_0_POINTS) / sizeof(uint8_t);
-
-// 1 point is 2 4-bit notes indices in NOTES_DIVISIONS array
-const uint8_t _SAMPLE_MELODY_0_NOTES_COUNT = _SAMPLE_MELODY_0_POINTS_COUNT * 2;
-
-uint8_t readMelodyPoint(const uint8_t pointIndex) {
-    return pgm_read_byte(&(_SAMPLE_MELODY_0_POINTS[pointIndex % _SAMPLE_MELODY_0_POINTS_COUNT]));
 }
 
-class PainMemoryNotesSequence : public NotesSequence {
-    uint8_t melodyNoteIndex = 0;
+namespace AutoNotesSequence {
+    namespace {
+        uint8_t activeNoteIndex = 0;
 
-    uint8_t  activeWaveformIndex = 0;
+        uint8_t  activeWaveformIndex = 0;
+    }
 
-public:
     void advanceWaveform() {
         activeWaveformIndex++;
     }
 
-    NoteInfo nextNote() final {
+    WaveformGen::NoteInfo nextNote() {
+        const uint8_t noteDivisions = readNoteDivisions(activeNoteIndex++);
+        const uint8_t noteWaveform = readWaveform(activeWaveformIndex);
+        return WaveformGen::NoteInfo { noteDivisions, noteWaveform };
+    }
+};
+
+namespace FlashMemoryMelody {
+    namespace {
+        const uint8_t _SAMPLE_MELODY_0_POINTS[] PROGMEM = {
+            0xAA, 0x0A, 0x08, 0xA0,
+            0xC0, 0x00, 0x50, 0x00,
+            0x80, 0x05, 0x00, 0x30,
+            0x06, 0x07, 0x06, 0x60,
+
+            0x00, 0x00, 0x00, 0x00,
+        };
+
+        const uint8_t _SAMPLE_MELODY_0_POINTS_COUNT = sizeof(_SAMPLE_MELODY_0_POINTS) / sizeof(uint8_t);
+
+        // one point is two 4-bit notes indices in NOTES_DIVISIONS array
+        const uint8_t _SAMPLE_MELODY_0_NOTES_COUNT = _SAMPLE_MELODY_0_POINTS_COUNT * 2;
+
+        uint8_t readMelodyPoint(const uint8_t pointIndex) {
+            divv::div(pointIndex, _SAMPLE_MELODY_0_POINTS_COUNT);
+            const uint8_t indexMod = divv::remainder;
+            return pgm_read_byte(&(_SAMPLE_MELODY_0_POINTS[indexMod]));
+        }
+    }
+
+    namespace {
+        uint8_t melodyNoteIndex = 0;
+
+        uint8_t  activeWaveformIndex = 0;
+    }
+
+    void advanceWaveform() {
+        activeWaveformIndex++;
+    }
+
+    WaveformGen::NoteInfo nextNote() {
         const uint8_t point = readMelodyPoint(melodyNoteIndex / 2);
         uint8_t noteDivisionsIndex;
         if (0 == melodyNoteIndex % 2) {
@@ -325,20 +380,17 @@ public:
 
         const uint8_t noteDivisions = readNoteDivisions(noteDivisionsIndex);
         const uint8_t noteWaveform = noteDivisionsIndex > 0 ? readWaveform(activeWaveformIndex) : 0;
-        return NoteInfo { noteDivisions, noteWaveform };
+        return WaveformGen::NoteInfo { noteDivisions, noteWaveform };
     }
-};
+}
 
 class Main {
 private:
-    ActiveNoteNotesSequence notesSequence;
-
-    WaveformGenerator waveformGenerator;
-
     InputHandler inputHandler;
 
 public:
-    Main() : waveformGenerator(notesSequence) {
+    Main() {
+        WaveformGen::wgsRestart(&FlashMemoryMelody::nextNote);
     }
 
     void run() {
@@ -352,26 +404,21 @@ public:
 
 private:
     void cycle() {
-        inputHandler.readAndFilterInput();
-
-        if (inputHandler.isRisingEdge(InputBtnL)) {
-            notesSequence.advanceNote();
+        inputHandler.pollInputs();
+        if (inputHandler.isRisingEdge(InputBtnMode)) {
+            FlashMemoryMelody::advanceWaveform();
         }
-        if (inputHandler.isRisingEdge(InputBtnR)) {
-            notesSequence.advanceWaveform();
+        if (inputHandler.isRisingEdge(InputBtnMinus)) {
+            FlashMemoryMelody::advanceWaveform();
+        }
+        if (inputHandler.isRisingEdge(InputBtnClick)) {
+            FlashMemoryMelody::advanceWaveform();
+        }
+        if (inputHandler.isRisingEdge(InputBtnPlus)) {
+            FlashMemoryMelody::advanceWaveform();
         }
 
-        _delay_ms(7);
-    }
-
-// interrupt callbacks
-public:
-    void onWaveformCycleStep() {
-        waveformGenerator.onStep();
-    }
-
-    void onWaveformCycleEnd() {
-        waveformGenerator.onEnd();
+        inputHandler.setLEDs(true, false, true, false);
     }
 };
 
@@ -379,20 +426,9 @@ public:
 
 // -------- INIT --------
 
-static Main *_mainCore;
-
-ISR(TIM0_COMPB_vect) {
-    _mainCore->onWaveformCycleStep();
-}
-
-ISR(TIM0_COMPA_vect) {
-    _mainCore->onWaveformCycleEnd();
-}
+Main mainCore;
 
 int main() {
-    static Main mainCore;
-    _mainCore = &mainCore;
-
     mainCore.run();
 }
 

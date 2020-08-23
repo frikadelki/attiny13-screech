@@ -4,38 +4,38 @@
 #include "BitAccess.h"
 
 template <
-    uint8_t DataDirectionRegister,
+    uint8_t DDRegister,
     uint8_t PORTRegister,
     uint8_t PINRegister,
     uint8_t PinBit
 >
 class OutputPin {
 private:
-    BitAccess<DataDirectionRegister, PinBit> dataDirection;
+    typedef BitAccess<DDRegister, PinBit> dataDirection;
 
-    BitAccess<PORTRegister, PinBit> dataOutput;
+    typedef BitAccess<PORTRegister, PinBit> dataOutput;
 
-    BitAccess<PINRegister, PinBit> dataReadOrToggle;
+    typedef BitAccess<PINRegister, PinBit> dataReadOrToggle;
 
 public:
     inline __attribute__((always_inline))
-    OutputPin() {
-        dataDirection.set();
+    static void init() {
+        dataDirection::set();
     }
 
     inline __attribute__((always_inline))
-    void set() {
-        dataOutput.set();
+    static void set() {
+        dataOutput::set();
     }
 
     inline __attribute__((always_inline))
-    void clear() {
-        dataOutput.clear();
+    static void clear() {
+        dataOutput::clear();
     }
 
     inline __attribute__((always_inline))
-    void set(bool isSet) {
-        dataOutput.set(isSet);
+    static void set(bool isSet) {
+        dataOutput::set(isSet);
     }
 };
 
