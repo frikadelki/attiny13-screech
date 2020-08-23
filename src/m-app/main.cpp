@@ -95,28 +95,32 @@ public:
     typedef NoteInfo (*NotesSequence)();
 
 private:
-    static const uint16_t TIMER_COUNTS_IN_SECOND = 9500;
+    static const uint16_t TIMER_PRESCALER = 1024;
+
+    static const uint16_t TIMER_COUNTS_IN_SECOND = F_CPU / TIMER_PRESCALER;
 
     static const uint16_t TIMER_COUNTS_PER_BEAT = TIMER_COUNTS_IN_SECOND / 8;
 
-    typedef struct WaveformGeneratorState {
+    struct WaveformGeneratorState {
         NotesSequence notesSequence = nullptr;
 
         uint16_t timeCounter = 0;
 
-        NoteInfo activeNote = { 255, 0 };
+        NoteInfo activeNote = { 0, 0 };
 
         uint8_t waveformStep = 0;
-    } WaveformGeneratorState;
+    };
 
     typedef OutputPin<DDRB, PORTB, PINB, 0> blinkerPin;
 
     static WaveformGeneratorState wgs;
 
+    inline __attribute__((always_inline))
     static uint8_t waveformStepDivisions() {
         return divv::div(wgs.activeNote.noteDivisions, WAVEFORM_LENGTH + 1);
     }
 
+    inline __attribute__((always_inline))
     static void primeTimers() {
         ACCESS_BYTE(OCR0A) = wgs.activeNote.noteDivisions;
         ACCESS_BYTE(OCR0B) = waveformStepDivisions();
@@ -129,7 +133,8 @@ private:
     }
 
 public:
-    static void wgsRestart(NotesSequence newNotesSequence) {
+    inline __attribute__((always_inline))
+    static void restartGenerator(NotesSequence newNotesSequence) {
         cli();
 
         blinkerPin::init();
@@ -156,7 +161,7 @@ public:
     }
 
     inline __attribute__((always_inline))
-    static void onStep() {
+    static void onWaveStep() {
         const bool wfBit = static_cast<uint8_t>(wgs.activeNote.waveform >> wgs.waveformStep) & 0b1u;
         blinkerPin::set(wfBit);
 
@@ -171,7 +176,7 @@ public:
     }
 
     inline __attribute__((always_inline))
-    static void onEnd() {
+    static void onWavePeriodEnd() {
         wgs.timeCounter += ACCESS_BYTE(OCR0A);
         if (wgs.timeCounter >= TIMER_COUNTS_PER_BEAT) {
             wgs.timeCounter -= TIMER_COUNTS_PER_BEAT;
@@ -184,11 +189,11 @@ public:
 WaveformGen::WaveformGeneratorState WaveformGen::wgs;
 
 ISR(TIM0_COMPB_vect) {
-    WaveformGen::onStep();
+    WaveformGen::onWaveStep();
 }
 
 ISR(TIM0_COMPA_vect) {
-    WaveformGen::onEnd();
+    WaveformGen::onWavePeriodEnd();
 }
 
 // ----------------
@@ -390,7 +395,7 @@ private:
 
 public:
     Main() {
-        WaveformGen::wgsRestart(&FlashMemoryMelody::nextNote);
+        WaveformGen::restartGenerator(&FlashMemoryMelody::nextNote);
     }
 
     void run() {
