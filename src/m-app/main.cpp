@@ -62,17 +62,11 @@ const uint8_t WAVEFORM_LENGTH = 8u;
 const uint8_t WAVEFORMS[] PROGMEM = {
         0b00000000,
 
-        0b10000000,
-        0b11110000,
-        0b11111100,
+        0b11110000, // -- square
 
-        0b10001000,
-        0b11001100,
+        0b10111000, // -- sawtooth
 
-        0b11110010,
-
-        0b10010010,
-        0b10101010,
+        0b01110101, // -- triangle
 };
 
 const uint8_t WAVEFORMS_COUNT = sizeof(WAVEFORMS) / sizeof(uint8_t);
@@ -117,7 +111,6 @@ private:
 
     static WaveformGeneratorState wgs;
 
-    inline __attribute__((always_inline))
     static uint8_t waveformStepDivisions() {
         return divv::div(wgs.activeNote.noteDivisions, WAVEFORM_LENGTH + 1);
     }
@@ -420,16 +413,15 @@ namespace FlashMemoryMelody {
         inline __attribute__((always_inline))
         static void onCycle() {
             if (InputHandler::isRisingEdge(InputBtnMode)) {
-                advanceWaveform();
+                melodyNoteIndex = 0;
             }
             if (InputHandler::isRisingEdge(InputBtnMinus)) {
-                advanceWaveform();
             }
             if (InputHandler::isRisingEdge(InputBtnClick)) {
-                advanceWaveform();
+                activeWaveformIndex--;
             }
             if (InputHandler::isRisingEdge(InputBtnPlus)) {
-                advanceWaveform();
+                activeWaveformIndex++;
             }
         }
 
@@ -451,6 +443,47 @@ namespace FlashMemoryMelody {
     private:
         static void advanceWaveform() {
             activeWaveformIndex++;
+        }
+    };
+}
+
+namespace Fooz {
+    namespace {
+        const uint8_t BANK_SIZE = 16;
+
+        uint8_t bank[BANK_SIZE];
+
+        uint8_t activeNoteIndex = 10;
+
+        uint8_t  activeWaveformIndex = 0;
+    }
+
+    class Logic {
+    public:
+        inline __attribute__((always_inline))
+        static void init() {
+        }
+
+        inline __attribute__((always_inline))
+        static void onCycle() {
+            if (InputHandler::isRisingEdge(InputBtnMode)) {
+                activeNoteIndex--;
+            }
+            if (InputHandler::isRisingEdge(InputBtnMinus)) {
+                activeNoteIndex++;
+            }
+            if (InputHandler::isRisingEdge(InputBtnClick)) {
+                activeWaveformIndex--;
+            }
+            if (InputHandler::isRisingEdge(InputBtnPlus)) {
+                activeWaveformIndex++;
+            }
+        }
+
+        static WaveformGen::NoteInfo nextNote() {
+            const uint8_t noteDivisions = readNoteDivisions(activeNoteIndex);
+            const uint8_t noteWaveform = readWaveform(activeWaveformIndex);
+            return WaveformGen::NoteInfo { noteDivisions, noteWaveform };
         }
     };
 }
@@ -484,7 +517,7 @@ namespace MainProtos {
     };
 }
 
-typedef ActiveNoteNotesSequence::Logic MainLogic;
+typedef Fooz::Logic MainLogic;
 
 class Main {
 public:
