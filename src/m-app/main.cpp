@@ -225,7 +225,7 @@ private:
 
     // 7 msb bits are filter value
     // 0th bit indicates if rising edge was detected during the latest poll
-    uint8_t buttonsState[InputButtonsCount] = { 0, 0, 0, 0 };
+    static uint8_t buttonsState[];
 
     inline __attribute__((always_inline))
     static void filter(const bool isOn, uint8_t& value, bool& edge) {
@@ -241,7 +241,8 @@ private:
         }
     }
 
-    void filterButton(const bool isOn, const InputBtn btn) {
+    __attribute__((noinline))
+    static void filterButton(const bool isOn, const InputBtn btn) {
         uint8_t btnFilter = static_cast<uint8_t>(buttonsState[btn] >> 1u) & INPUT_FILTER_MASK;
         bool edge = false;
         filter(isOn, btnFilter, edge);
@@ -249,20 +250,18 @@ private:
     }
 
 public:
-#pragma clang diagnostic push
-#pragma ide diagnostic ignored "modernize-use-equals-default"
-    InputHandler() { // NOLINT(hicpp-use-equals-default)
+    inline __attribute__((always_inline))
+    static void init() {
         // we can skip this and save some instructions because
         // micro's startup state matches defaults for ComboPin
         // inputMode::init();
         // inputMinus::init();
         // inputClick::init();
         // inputPlus::init();
-    };
-#pragma clang diagnostic pop
+    }
 
     inline __attribute__((always_inline))
-    void pollInputs() {
+    static void pollInputs() {
         inputMode::inputPrime();
         inputMinus::inputPrime();
         inputClick::inputPrime();
@@ -275,30 +274,32 @@ public:
     }
 
     inline __attribute__((always_inline))
-    bool isRisingEdge(const InputBtn btn) {
+    static bool isRisingEdge(const InputBtn btn) {
         return (buttonsState[btn] & 0b1u);
     }
 
     inline __attribute__((always_inline))
-    void setLEDs(const bool i3, const bool i2, const bool i1, const bool i0) {
+    static void setLEDs(const bool i3, const bool i2, const bool i1, const bool i0) {
         inputMode::outputSet(i3);
         inputMinus::outputSet(i2);
         inputClick::outputSet(i1);
         inputPlus::outputSet(i0);
     }
 
-    void setLEDs(uint8_t val) {
+    static void setLEDs(uint8_t val) {
         setLEDs(
-                static_cast<uint8_t>(val >> 3u) & 1u,
-                static_cast<uint8_t>(val >> 2u) & 1u,
-                static_cast<uint8_t>(val >> 1u) & 1u,
-                static_cast<uint8_t>(val >> 0u) & 1u);
+            static_cast<uint8_t>(val >> 3u) & 1u,
+            static_cast<uint8_t>(val >> 2u) & 1u,
+            static_cast<uint8_t>(val >> 1u) & 1u,
+            static_cast<uint8_t>(val >> 0u) & 1u);
     }
 };
 
+uint8_t InputHandler::buttonsState[InputButtonsCount] = { 0, 0, 0, 0 };
+
 // ----------------
 
-// -------- MAIN --------
+// -------- NOTES SEQUENCES --------
 
 namespace ActiveNoteNotesSequence {
     namespace {
@@ -366,7 +367,7 @@ namespace FlashMemoryMelody {
     namespace {
         uint8_t melodyNoteIndex = 0;
 
-        uint8_t  activeWaveformIndex = 0;
+        uint8_t activeWaveformIndex = 0;
     }
 
     void advanceWaveform() {
@@ -389,16 +390,18 @@ namespace FlashMemoryMelody {
     }
 }
 
-class Main {
-private:
-    InputHandler inputHandler;
+// -------- MAIN --------
 
+class Main {
 public:
-    Main() {
+    inline __attribute__((always_inline))
+    static void init() {
+        InputHandler::init();
         WaveformGen::restartGenerator(&FlashMemoryMelody::nextNote);
     }
 
-    void run() {
+    inline __attribute__((always_inline))
+    static void run() {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wmissing-noreturn"
         while (true) {
@@ -408,33 +411,29 @@ public:
     }
 
 private:
-    void cycle() {
-        inputHandler.pollInputs();
-        if (inputHandler.isRisingEdge(InputBtnMode)) {
+    inline __attribute__((always_inline))
+    static void cycle() {
+        InputHandler::pollInputs();
+        if (InputHandler::isRisingEdge(InputBtnMode)) {
             FlashMemoryMelody::advanceWaveform();
         }
-        if (inputHandler.isRisingEdge(InputBtnMinus)) {
+        if (InputHandler::isRisingEdge(InputBtnMinus)) {
             FlashMemoryMelody::advanceWaveform();
         }
-        if (inputHandler.isRisingEdge(InputBtnClick)) {
+        if (InputHandler::isRisingEdge(InputBtnClick)) {
             FlashMemoryMelody::advanceWaveform();
         }
-        if (inputHandler.isRisingEdge(InputBtnPlus)) {
+        if (InputHandler::isRisingEdge(InputBtnPlus)) {
             FlashMemoryMelody::advanceWaveform();
         }
-
-        inputHandler.setLEDs(true, false, true, false);
+        InputHandler::setLEDs(true, false, true, false);
     }
 };
 
-// ----------------
-
-// -------- INIT --------
-
-Main mainCore;
-
 int main() {
-    mainCore.run();
+    Main::init();
+    Main::run();
+    return 0;
 }
 
 // ----------------
