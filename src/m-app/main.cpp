@@ -281,6 +281,7 @@ public:
         inputPlus::outputSet(i0);
     }
 
+    inline __attribute__((always_inline))
     static void setLEDs(uint8_t val) {
         setLEDs(
             static_cast<uint8_t>(val >> 3u) & 1u,
@@ -478,6 +479,7 @@ namespace Fooz {
             if (InputHandler::isRisingEdge(InputBtnPlus)) {
                 activeWaveformIndex++;
             }
+            InputHandler::setLEDs(activeNoteIndex);
         }
 
         static WaveformGen::NoteInfo nextNote() {
@@ -543,7 +545,7 @@ private:
     static void cycle() {
         InputHandler::pollInputs();
         MainLogic::onCycle();
-        InputHandler::setLEDs(true, false, true, false);
+        //InputHandler::setLEDs(true, false, true, false);
     }
 };
 
