@@ -22,6 +22,8 @@ namespace divv {
     }
 }
 
+// ----------------
+
 // -------- NOTES DATA --------
 
 const uint8_t NOTES_DIVISIONS[] PROGMEM = {
@@ -219,7 +221,7 @@ private:
 
     typedef ComboPin<DDRB, PORTB, PINB, 1> inputPlus;
 
-    static const uint8_t INPUT_FILTER_MASK = 0b1111u;
+    static const uint8_t INPUT_FILTER_MASK = 0b1111111u;
 
     static const uint8_t INPUT_FILTER_MAX = INPUT_FILTER_MASK;
 
@@ -308,19 +310,34 @@ namespace ActiveNoteNotesSequence {
         uint8_t  activeWaveformIndex = 0;
     }
 
-    void advanceNote() {
-        activeNoteIndex++;
-    }
+    class Logic {
+    public:
+        inline __attribute__((always_inline))
+        static void init() {
+        }
 
-    void advanceWaveform() {
-        activeWaveformIndex++;
-    }
+        inline __attribute__((always_inline))
+        static void onCycle() {
+            if (InputHandler::isRisingEdge(InputBtnMode)) {
+                activeNoteIndex--;
+            }
+            if (InputHandler::isRisingEdge(InputBtnMinus)) {
+                activeNoteIndex++;
+            }
+            if (InputHandler::isRisingEdge(InputBtnClick)) {
+                activeWaveformIndex--;
+            }
+            if (InputHandler::isRisingEdge(InputBtnPlus)) {
+                activeWaveformIndex++;
+            }
+        }
 
-    WaveformGen::NoteInfo nextNote() {
-        const uint8_t noteDivisions = readNoteDivisions(activeNoteIndex);
-        const uint8_t noteWaveform = readWaveform(activeWaveformIndex);
-        return WaveformGen::NoteInfo { noteDivisions, noteWaveform };
-    }
+        static WaveformGen::NoteInfo nextNote() {
+            const uint8_t noteDivisions = readNoteDivisions(activeNoteIndex);
+            const uint8_t noteWaveform = readWaveform(activeWaveformIndex);
+            return WaveformGen::NoteInfo { noteDivisions, noteWaveform };
+        }
+    };
 }
 
 namespace AutoNotesSequence {
@@ -330,15 +347,39 @@ namespace AutoNotesSequence {
         uint8_t  activeWaveformIndex = 0;
     }
 
-    void advanceWaveform() {
-        activeWaveformIndex++;
-    }
+    class Logic {
+    public:
+        inline __attribute__((always_inline))
+        static void init() {
+        }
 
-    WaveformGen::NoteInfo nextNote() {
-        const uint8_t noteDivisions = readNoteDivisions(activeNoteIndex++);
-        const uint8_t noteWaveform = readWaveform(activeWaveformIndex);
-        return WaveformGen::NoteInfo { noteDivisions, noteWaveform };
-    }
+        inline __attribute__((always_inline))
+        static void onCycle() {
+            if (InputHandler::isRisingEdge(InputBtnMode)) {
+                advanceWaveform();
+            }
+            if (InputHandler::isRisingEdge(InputBtnMinus)) {
+                advanceWaveform();
+            }
+            if (InputHandler::isRisingEdge(InputBtnClick)) {
+                advanceWaveform();
+            }
+            if (InputHandler::isRisingEdge(InputBtnPlus)) {
+                advanceWaveform();
+            }
+        }
+
+        static WaveformGen::NoteInfo nextNote() {
+            const uint8_t noteDivisions = readNoteDivisions(activeNoteIndex++);
+            const uint8_t noteWaveform = readWaveform(activeWaveformIndex);
+            return WaveformGen::NoteInfo { noteDivisions, noteWaveform };
+        }
+
+    private:
+        static void advanceWaveform() {
+            activeWaveformIndex++;
+        }
+    };
 };
 
 namespace FlashMemoryMelody {
@@ -370,34 +411,88 @@ namespace FlashMemoryMelody {
         uint8_t activeWaveformIndex = 0;
     }
 
-    void advanceWaveform() {
-        activeWaveformIndex++;
-    }
-
-    WaveformGen::NoteInfo nextNote() {
-        const uint8_t point = readMelodyPoint(melodyNoteIndex / 2);
-        uint8_t noteDivisionsIndex;
-        if (0 == melodyNoteIndex % 2) {
-            noteDivisionsIndex = (point >> 4u);
-        } else {
-            noteDivisionsIndex = point & 0b1111u;
+    class Logic {
+    public:
+        inline __attribute__((always_inline))
+        static void init() {
         }
-        melodyNoteIndex++;
 
-        const uint8_t noteDivisions = readNoteDivisions(noteDivisionsIndex);
-        const uint8_t noteWaveform = noteDivisionsIndex > 0 ? readWaveform(activeWaveformIndex) : 0;
-        return WaveformGen::NoteInfo { noteDivisions, noteWaveform };
-    }
+        inline __attribute__((always_inline))
+        static void onCycle() {
+            if (InputHandler::isRisingEdge(InputBtnMode)) {
+                advanceWaveform();
+            }
+            if (InputHandler::isRisingEdge(InputBtnMinus)) {
+                advanceWaveform();
+            }
+            if (InputHandler::isRisingEdge(InputBtnClick)) {
+                advanceWaveform();
+            }
+            if (InputHandler::isRisingEdge(InputBtnPlus)) {
+                advanceWaveform();
+            }
+        }
+
+        static WaveformGen::NoteInfo nextNote() {
+            const uint8_t point = readMelodyPoint(melodyNoteIndex / 2);
+            uint8_t noteDivisionsIndex;
+            if (0 == melodyNoteIndex % 2) {
+                noteDivisionsIndex = (point >> 4u);
+            } else {
+                noteDivisionsIndex = point & 0b1111u;
+            }
+            melodyNoteIndex++;
+
+            const uint8_t noteDivisions = readNoteDivisions(noteDivisionsIndex);
+            const uint8_t noteWaveform = noteDivisionsIndex > 0 ? readWaveform(activeWaveformIndex) : 0;
+            return WaveformGen::NoteInfo { noteDivisions, noteWaveform };
+        }
+
+    private:
+        static void advanceWaveform() {
+            activeWaveformIndex++;
+        }
+    };
 }
 
+// ----------------
+
 // -------- MAIN --------
+
+namespace MainProtos {
+    class EmptyMainLogic {
+    public:
+        inline __attribute__((always_inline))
+        static void init() {
+        }
+
+        inline __attribute__((always_inline))
+        static void onCycle() {
+            if (InputHandler::isRisingEdge(InputBtnMode)) {
+            }
+            if (InputHandler::isRisingEdge(InputBtnMinus)) {
+            }
+            if (InputHandler::isRisingEdge(InputBtnClick)) {
+            }
+            if (InputHandler::isRisingEdge(InputBtnPlus)) {
+            }
+        }
+
+        static WaveformGen::NoteInfo nextNote() {
+            return WaveformGen::NoteInfo { 0, 0 };
+        }
+    };
+}
+
+typedef ActiveNoteNotesSequence::Logic MainLogic;
 
 class Main {
 public:
     inline __attribute__((always_inline))
     static void init() {
         InputHandler::init();
-        WaveformGen::restartGenerator(&FlashMemoryMelody::nextNote);
+        MainLogic::init();
+        WaveformGen::restartGenerator(&MainLogic::nextNote);
     }
 
     inline __attribute__((always_inline))
@@ -414,18 +509,7 @@ private:
     inline __attribute__((always_inline))
     static void cycle() {
         InputHandler::pollInputs();
-        if (InputHandler::isRisingEdge(InputBtnMode)) {
-            FlashMemoryMelody::advanceWaveform();
-        }
-        if (InputHandler::isRisingEdge(InputBtnMinus)) {
-            FlashMemoryMelody::advanceWaveform();
-        }
-        if (InputHandler::isRisingEdge(InputBtnClick)) {
-            FlashMemoryMelody::advanceWaveform();
-        }
-        if (InputHandler::isRisingEdge(InputBtnPlus)) {
-            FlashMemoryMelody::advanceWaveform();
-        }
+        MainLogic::onCycle();
         InputHandler::setLEDs(true, false, true, false);
     }
 };
