@@ -331,10 +331,10 @@ namespace UIDriver {
 
     inline __attribute__((always_inline))
     void setLEDs(const uint8_t val) {
-        pinPlus::outputSet(val & 0b0001u);
-        pinClick::outputSet(val & 0b0010u);
-        pinMinus::outputSet(val & 0b0100u);
         pinMode::outputSet(val & 0b1000u);
+        pinMinus::outputSet(val & 0b0100u);
+        pinClick::outputSet(val & 0b0010u);
+        pinPlus::outputSet(val & 0b0001u);
     }
 }
 
