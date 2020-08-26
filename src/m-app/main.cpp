@@ -81,56 +81,114 @@ uint8_t readWaveform(const uint8_t waveformIndex) {
 
 // -------- WAVEFORM GEN --------
 
-class WaveformGen {
-public:
+namespace WaveformGen {
     typedef struct NoteInfo {
         uint8_t noteDivisions;
 
         uint8_t waveform;
     } NoteInfo;
 
-    typedef NoteInfo (*NotesSequence)();
+    extern NoteInfo nextNoteSource();
 
-private:
-    static const uint16_t TIMER_PRESCALER = 1024;
+    void restartGenerator();
+}
 
-    static const uint16_t TIMER_COUNTS_IN_SECOND = F_CPU / TIMER_PRESCALER;
+namespace WaveformGen {
+    namespace {
+        const uint16_t TIMER_PRESCALER = 1024;
 
-    static const uint16_t TIMER_COUNTS_PER_BEAT = TIMER_COUNTS_IN_SECOND / 8;
+        const uint16_t TIMER_COUNTS_IN_SECOND = F_CPU / TIMER_PRESCALER;
 
-    struct WaveformGeneratorState {
-        NotesSequence notesSequence = nullptr;
+        const uint16_t TIMER_COUNTS_PER_BEAT = TIMER_COUNTS_IN_SECOND / 8;
 
-        uint16_t timeCounter = 0;
+        typedef OutputPin<DDRB, PORTB, PINB, 0> blinkerPin;
 
-        NoteInfo activeNote = { 0, 0 };
+        struct WaveformGeneratorState {
+            uint16_t timeCounter = 0;
 
-        uint8_t liveWaveform = 0;
-    };
+            WaveformGen::NoteInfo activeNote = { 0, 0 };
 
-    typedef OutputPin<DDRB, PORTB, PINB, 0> blinkerPin;
+            uint8_t liveWaveform = 0;
+        };
 
-    static WaveformGeneratorState wgs;
+        WaveformGeneratorState wgs;
 
-    static uint8_t waveformStepDivisions() {
-        return divv::div(wgs.activeNote.noteDivisions, WAVEFORM_LENGTH + 1);
+//        uint16_t _timeCounter = 0;
+
+//        WaveformGen::NoteInfo _activeNote = { 0, 0 };
+
+//        uint8_t _liveWaveform = 0;
+
+        inline __attribute__((always_inline))
+        uint16_t& timeCounter() {
+            //return _timeCounter;
+            return wgs.timeCounter;
+        }
+
+        inline __attribute__((always_inline))
+        NoteInfo& activeNote() {
+            //return _activeNote;
+            return wgs.activeNote;
+        }
+
+        inline __attribute__((always_inline))
+        uint8_t& liveWaveform() {
+            //return _liveWaveform;
+            return wgs.liveWaveform;
+        }
+
+        uint8_t waveformStepDivisions() {
+            return divv::div(activeNote().noteDivisions, WAVEFORM_LENGTH + 1);
+        }
+
+        void fetchNextNote() {
+            activeNote() = nextNoteSource();
+        }
+
+        inline __attribute__((always_inline))
+        void primeTimers() {
+            ACCESS_BYTE(OCR0A) = activeNote().noteDivisions;
+            ACCESS_BYTE(OCR0B) = waveformStepDivisions();
+        }
+
+        void primeNextWavePeriod() {
+            blinkerPin::clear();
+            liveWaveform() = activeNote().waveform;
+            primeTimers();
+        }
+
+        inline __attribute__((always_inline))
+        void onWaveStep() {
+            const bool wfBit = liveWaveform() & 0b1u;
+            liveWaveform() >>= 1u;
+            blinkerPin::set(wfBit);
+            ACCESS_BYTE(OCR0B) += waveformStepDivisions();
+        }
+
+        inline __attribute__((always_inline))
+        void onWavePeriodEnd() {
+            timeCounter() += ACCESS_BYTE(OCR0A);
+            if (timeCounter() >= TIMER_COUNTS_PER_BEAT) {
+                timeCounter() = 0;
+                fetchNextNote();
+            }
+            primeNextWavePeriod();
+        }
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunknown-attributes"
+        ISR(TIM0_COMPB_vect) {
+            onWaveStep();
+        }
+
+        ISR(TIM0_COMPA_vect) {
+            onWavePeriodEnd();
+        }
+#pragma clang diagnostic pop
     }
 
     inline __attribute__((always_inline))
-    static void primeTimers() {
-        ACCESS_BYTE(OCR0A) = wgs.activeNote.noteDivisions;
-        ACCESS_BYTE(OCR0B) = waveformStepDivisions();
-    }
-
-    static void primeNextWavePeriod() {
-        blinkerPin::clear();
-        wgs.liveWaveform = wgs.activeNote.waveform;
-        primeTimers();
-    }
-
-public:
-    inline __attribute__((always_inline))
-    static void restartGenerator(NotesSequence newNotesSequence) {
+    void restartGenerator() {
         cli();
 
         blinkerPin::init();
@@ -142,47 +200,17 @@ public:
         ACCESS_BYTE(TIMSK0) |= BIT_MASK(OCIE0A) | BIT_MASK(OCIE0B);
 
         // clear any relevant pending interrupts and reset timer counter
-        ACCESS_BYTE(TIFR0) = BIT_MASK(OCF0B) | BIT_MASK(OCF0A) | BIT_MASK(TOV0);
-        ACCESS_BYTE(TCNT0) = 0;
+        // assuming we don't need those, and generator will be started exactly once
+        //ACCESS_BYTE(TIFR0) = BIT_MASK(OCF0B) | BIT_MASK(OCF0A) | BIT_MASK(TOV0);
+        //ACCESS_BYTE(TCNT0) = 0;
 
-        wgs.notesSequence = newNotesSequence;
-        wgs.timeCounter = 0;
-        wgs.activeNote = wgs.notesSequence();
-        primeNextWavePeriod();
+        timeCounter() = TIMER_COUNTS_PER_BEAT;
 
         // set pre-scaler to 1024 and start timer
         ACCESS_BYTE(TCCR0B) |= BIT_MASK(CS02) | BIT_MASK(CS00);
 
         sei();
     }
-
-    inline __attribute__((always_inline))
-    static void onWaveStep() {
-        const bool wfBit = wgs.liveWaveform & 0b1u;
-        wgs.liveWaveform >>= 1u;
-        blinkerPin::set(wfBit);
-        ACCESS_BYTE(OCR0B) += waveformStepDivisions();
-    }
-
-    inline __attribute__((always_inline))
-    static void onWavePeriodEnd() {
-        wgs.timeCounter += ACCESS_BYTE(OCR0A);
-        if (wgs.timeCounter >= TIMER_COUNTS_PER_BEAT) {
-            wgs.timeCounter -= TIMER_COUNTS_PER_BEAT;
-            wgs.activeNote = wgs.notesSequence();
-        }
-        primeNextWavePeriod();
-    }
-};
-
-WaveformGen::WaveformGeneratorState WaveformGen::wgs;
-
-ISR(TIM0_COMPB_vect) {
-    WaveformGen::onWaveStep();
-}
-
-ISR(TIM0_COMPA_vect) {
-    WaveformGen::onWavePeriodEnd();
 }
 
 // ----------------
@@ -318,6 +346,7 @@ namespace ActiveNoteNotesSequence {
             if (InputHandler::isRisingEdge(InputBtnPlus)) {
                 activeWaveformIndex++;
             }
+            InputHandler::setLEDs(true, false, true, false);
         }
 
         static WaveformGen::NoteInfo nextNote() {
@@ -355,6 +384,7 @@ namespace AutoNotesSequence {
             if (InputHandler::isRisingEdge(InputBtnPlus)) {
                 advanceWaveform();
             }
+            InputHandler::setLEDs(true, false, true, false);
         }
 
         static WaveformGen::NoteInfo nextNote() {
@@ -418,6 +448,7 @@ namespace FlashMemoryMelody {
             if (InputHandler::isRisingEdge(InputBtnPlus)) {
                 activeWaveformIndex++;
             }
+            InputHandler::setLEDs(true, false, true, false);
         }
 
         static WaveformGen::NoteInfo nextNote() {
@@ -501,6 +532,7 @@ namespace MainProtos {
             }
             if (InputHandler::isRisingEdge(InputBtnPlus)) {
             }
+            InputHandler::setLEDs(true, false, true, false);
         }
 
         static WaveformGen::NoteInfo nextNote() {
@@ -511,13 +543,17 @@ namespace MainProtos {
 
 typedef Fooz::Logic MainLogic;
 
+WaveformGen::NoteInfo WaveformGen::nextNoteSource() {
+    return MainLogic::nextNote();
+}
+
 class Main {
 public:
     inline __attribute__((always_inline))
     static void init() {
         InputHandler::init();
         MainLogic::init();
-        WaveformGen::restartGenerator(&MainLogic::nextNote);
+        WaveformGen::restartGenerator();
     }
 
     inline __attribute__((always_inline))
@@ -535,7 +571,6 @@ private:
     static void cycle() {
         InputHandler::pollInputs();
         MainLogic::onCycle();
-        //InputHandler::setLEDs(true, false, true, false);
     }
 };
 
