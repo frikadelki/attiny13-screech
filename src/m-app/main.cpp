@@ -229,104 +229,114 @@ namespace WaveformGen {
 
 // ----------------
 
-// -------- INPUT HANDLER --------
+// -------- UI Driver --------
 
-enum InputBtn {
-    InputButtonsCount =  4,
+namespace UIDriver {
+    enum InputBtn {
+        InputButtonsCount =  4,
 
-    InputBtnMode =  3,
-    InputBtnMinus = 2,
-    InputBtnClick = 1,
-    InputBtnPlus =  0,
-};
+        InputBtnMode =  3,
+        InputBtnMinus = 2,
+        InputBtnClick = 1,
+        InputBtnPlus =  0,
+    };
 
-class InputHandler {
-private:
-    typedef ComboPin<DDRB, PORTB, PINB, 4> inputMode;
+    void init();
 
-    typedef ComboPin<DDRB, PORTB, PINB, 3> inputMinus;
+    void pollInputs();
 
-    typedef ComboPin<DDRB, PORTB, PINB, 2> inputClick;
+    bool isRisingEdge(InputBtn btn);
 
-    typedef ComboPin<DDRB, PORTB, PINB, 1> inputPlus;
+    void setLEDs(bool i3, bool i2, bool i1, bool i0);
 
-    static const uint8_t INPUT_FILTER_MASK = 0b1111111u;
+    void setLEDs(uint8_t val);
+}
 
-    static const uint8_t INPUT_FILTER_MAX = INPUT_FILTER_MASK;
+namespace UIDriver {
+    namespace {
+        const uint8_t INPUT_FILTER_MASK = 0b1111111u;
 
-    // 7 msb bits are filter value
-    // 0th bit indicates if rising edge was detected during the latest poll
-    static uint8_t buttonsState[];
+        const uint8_t INPUT_FILTER_MAX = INPUT_FILTER_MASK;
 
-    inline __attribute__((always_inline))
-    static void filter(const bool isOn, uint8_t& value, bool& edge) {
-        if (isOn) {
-            if (value < INPUT_FILTER_MAX) {
-                value++;
-                if (value == INPUT_FILTER_MAX) {
-                    edge = true;
+        inline __attribute__((always_inline))
+        void filter(const bool isOn, uint8_t& value, bool& edge) {
+            if (isOn) {
+                if (value < INPUT_FILTER_MAX) {
+                    value++;
+                    if (value == INPUT_FILTER_MAX) {
+                        edge = true;
+                    }
                 }
+            } else {
+                value = 0;
             }
-        } else {
-            value = 0;
+        }
+
+        typedef ComboPin<DDRB, PORTB, PINB, 4> pinMode;
+
+        typedef ComboPin<DDRB, PORTB, PINB, 3> pinMinus;
+
+        typedef ComboPin<DDRB, PORTB, PINB, 2> pinClick;
+
+        typedef ComboPin<DDRB, PORTB, PINB, 1> pinPlus;
+
+        // 7 msb bits are filter value
+        // 0th bit indicates if rising edge was detected during the latest poll
+        uint8_t buttonsState[InputButtonsCount] = { 0, 0, 0, 0 };
+
+        __attribute__((noinline))
+        void filterButton(const bool isOn, const InputBtn btn) {
+            uint8_t btnFilter = static_cast<uint8_t>(buttonsState[btn] >> 1u) & INPUT_FILTER_MASK;
+            bool edge = false;
+            filter(isOn, btnFilter, edge);
+            buttonsState[btn] = static_cast<uint8_t>(btnFilter << 1u) | edge;
         }
     }
 
-    __attribute__((noinline))
-    static void filterButton(const bool isOn, const InputBtn btn) {
-        uint8_t btnFilter = static_cast<uint8_t>(buttonsState[btn] >> 1u) & INPUT_FILTER_MASK;
-        bool edge = false;
-        filter(isOn, btnFilter, edge);
-        buttonsState[btn] = static_cast<uint8_t>(btnFilter << 1u) | edge;
-    }
-
-public:
     inline __attribute__((always_inline))
-    static void init() {
+    void init() {
         // we can skip this and save some instructions because
         // micro's startup state matches defaults for ComboPin
-        // inputMode::init();
-        // inputMinus::init();
-        // inputClick::init();
-        // inputPlus::init();
+        // pinMode::init();
+        // pinMinus::init();
+        // pinClick::init();
+        // pinPlus::init();
     }
 
     inline __attribute__((always_inline))
-    static void pollInputs() {
-        inputMode::inputPrime();
-        inputMinus::inputPrime();
-        inputClick::inputPrime();
-        inputPlus::inputPrime();
+    void pollInputs() {
+        pinMode::inputPrime();
+        pinMinus::inputPrime();
+        pinClick::inputPrime();
+        pinPlus::inputPrime();
         comboPinWaitInputSettle();
-        filterButton(inputMode::inputRead(), InputBtnMode);
-        filterButton(inputMinus::inputRead(), InputBtnMinus);
-        filterButton(inputClick::inputRead(), InputBtnClick);
-        filterButton(inputPlus::inputRead(), InputBtnPlus);
+        filterButton(pinMode::inputRead(), InputBtnMode);
+        filterButton(pinMinus::inputRead(), InputBtnMinus);
+        filterButton(pinClick::inputRead(), InputBtnClick);
+        filterButton(pinPlus::inputRead(), InputBtnPlus);
     }
 
     inline __attribute__((always_inline))
-    static bool isRisingEdge(const InputBtn btn) {
+    bool isRisingEdge(const InputBtn btn) {
         return (buttonsState[btn] & 0b1u);
     }
 
     inline __attribute__((always_inline))
-    static void setLEDs(const bool i3, const bool i2, const bool i1, const bool i0) {
-        inputMode::outputSet(i3);
-        inputMinus::outputSet(i2);
-        inputClick::outputSet(i1);
-        inputPlus::outputSet(i0);
+    void setLEDs(const bool i3, const bool i2, const bool i1, const bool i0) {
+        pinMode::outputSet(i3);
+        pinMinus::outputSet(i2);
+        pinClick::outputSet(i1);
+        pinPlus::outputSet(i0);
     }
 
     inline __attribute__((always_inline))
-    static void setLEDs(const uint8_t val) {
-        inputPlus::outputSet(val & 0b0001u);
-        inputClick::outputSet(val & 0b0010u);
-        inputMinus::outputSet(val & 0b0100u);
-        inputMode::outputSet(val & 0b1000u);
+    void setLEDs(const uint8_t val) {
+        pinPlus::outputSet(val & 0b0001u);
+        pinClick::outputSet(val & 0b0010u);
+        pinMinus::outputSet(val & 0b0100u);
+        pinMode::outputSet(val & 0b1000u);
     }
-};
-
-uint8_t InputHandler::buttonsState[InputButtonsCount] = { 0, 0, 0, 0 };
+}
 
 // ----------------
 
@@ -347,19 +357,19 @@ namespace ActiveNoteNotesSequence {
 
         inline __attribute__((always_inline))
         static void onCycle() {
-            if (InputHandler::isRisingEdge(InputBtnMode)) {
+            if (UIDriver::isRisingEdge(UIDriver::InputBtnMode)) {
                 activeNoteIndex--;
             }
-            if (InputHandler::isRisingEdge(InputBtnMinus)) {
+            if (UIDriver::isRisingEdge(UIDriver::InputBtnMinus)) {
                 activeNoteIndex++;
             }
-            if (InputHandler::isRisingEdge(InputBtnClick)) {
+            if (UIDriver::isRisingEdge(UIDriver::InputBtnClick)) {
                 activeWaveformIndex--;
             }
-            if (InputHandler::isRisingEdge(InputBtnPlus)) {
+            if (UIDriver::isRisingEdge(UIDriver::InputBtnPlus)) {
                 activeWaveformIndex++;
             }
-            InputHandler::setLEDs(true, false, true, false);
+            UIDriver::setLEDs(true, false, true, false);
         }
 
         inline __attribute__((always_inline))
@@ -386,19 +396,19 @@ namespace AutoNotesSequence {
 
         inline __attribute__((always_inline))
         static void onCycle() {
-            if (InputHandler::isRisingEdge(InputBtnMode)) {
+            if (UIDriver::isRisingEdge(UIDriver::InputBtnMode)) {
                 advanceWaveform();
             }
-            if (InputHandler::isRisingEdge(InputBtnMinus)) {
+            if (UIDriver::isRisingEdge(UIDriver::InputBtnMinus)) {
                 advanceWaveform();
             }
-            if (InputHandler::isRisingEdge(InputBtnClick)) {
+            if (UIDriver::isRisingEdge(UIDriver::InputBtnClick)) {
                 advanceWaveform();
             }
-            if (InputHandler::isRisingEdge(InputBtnPlus)) {
+            if (UIDriver::isRisingEdge(UIDriver::InputBtnPlus)) {
                 advanceWaveform();
             }
-            InputHandler::setLEDs(true, false, true, false);
+            UIDriver::setLEDs(true, false, true, false);
         }
 
         inline __attribute__((always_inline))
@@ -452,18 +462,18 @@ namespace FlashMemoryMelody {
 
         inline __attribute__((always_inline))
         static void onCycle() {
-            if (InputHandler::isRisingEdge(InputBtnMode)) {
+            if (UIDriver::isRisingEdge(UIDriver::InputBtnMode)) {
                 melodyNoteIndex = 0;
             }
-            if (InputHandler::isRisingEdge(InputBtnMinus)) {
+            if (UIDriver::isRisingEdge(UIDriver::InputBtnMinus)) {
             }
-            if (InputHandler::isRisingEdge(InputBtnClick)) {
+            if (UIDriver::isRisingEdge(UIDriver::InputBtnClick)) {
                 activeWaveformIndex--;
             }
-            if (InputHandler::isRisingEdge(InputBtnPlus)) {
+            if (UIDriver::isRisingEdge(UIDriver::InputBtnPlus)) {
                 activeWaveformIndex++;
             }
-            InputHandler::setLEDs(true, false, true, false);
+            UIDriver::setLEDs(true, false, true, false);
         }
 
         inline __attribute__((always_inline))
@@ -496,19 +506,19 @@ namespace Fooz {
 
         inline __attribute__((always_inline))
         static void onCycle() {
-            if (InputHandler::isRisingEdge(InputBtnMode)) {
+            if (UIDriver::isRisingEdge(UIDriver::InputBtnMode)) {
                 activeNoteIndex--;
             }
-            if (InputHandler::isRisingEdge(InputBtnMinus)) {
+            if (UIDriver::isRisingEdge(UIDriver::InputBtnMinus)) {
                 activeNoteIndex++;
             }
-            if (InputHandler::isRisingEdge(InputBtnClick)) {
+            if (UIDriver::isRisingEdge(UIDriver::InputBtnClick)) {
                 activeWaveformIndex--;
             }
-            if (InputHandler::isRisingEdge(InputBtnPlus)) {
+            if (UIDriver::isRisingEdge(UIDriver::InputBtnPlus)) {
                 activeWaveformIndex++;
             }
-            InputHandler::setLEDs(activeNoteIndex);
+            UIDriver::setLEDs(activeNoteIndex);
         }
 
         inline __attribute__((always_inline))
@@ -533,15 +543,15 @@ namespace MainProtos {
 
         inline __attribute__((always_inline))
         static void onCycle() {
-            if (InputHandler::isRisingEdge(InputBtnMode)) {
+            if (UIDriver::isRisingEdge(UIDriver::InputBtnMode)) {
             }
-            if (InputHandler::isRisingEdge(InputBtnMinus)) {
+            if (UIDriver::isRisingEdge(UIDriver::InputBtnMinus)) {
             }
-            if (InputHandler::isRisingEdge(InputBtnClick)) {
+            if (UIDriver::isRisingEdge(UIDriver::InputBtnClick)) {
             }
-            if (InputHandler::isRisingEdge(InputBtnPlus)) {
+            if (UIDriver::isRisingEdge(UIDriver::InputBtnPlus)) {
             }
-            InputHandler::setLEDs(true, false, true, false);
+            UIDriver::setLEDs(true, false, true, false);
         }
 
         static WaveformGen::NoteInfo nextNote() {
@@ -560,7 +570,7 @@ class Main {
 public:
     inline __attribute__((always_inline))
     static void init() {
-        InputHandler::init();
+        UIDriver::init();
         MainLogic::init();
         WaveformGen::restartGenerator();
     }
@@ -578,7 +588,7 @@ public:
 private:
     inline __attribute__((always_inline))
     static void cycle() {
-        InputHandler::pollInputs();
+        UIDriver::pollInputs();
         MainLogic::onCycle();
     }
 };
