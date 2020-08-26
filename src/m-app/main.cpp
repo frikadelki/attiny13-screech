@@ -120,11 +120,18 @@ namespace WaveformGen {
 
         WaveformGeneratorState wgs;
 
-//        uint16_t _timeCounter = 0;
+        // this is weird, compilation produces different code
+        // depending if data is "packed" or "flat
+        // seems to be affected by members in the struct too
+        /*
+        uint16_t _timeCounter = 0;
 
-//        WaveformGen::NoteInfo _activeNote = { 0, 0 };
+        WaveformGen::NoteInfo _activeNote = { 0, 0 };
 
-//        uint8_t _liveWaveform = 0;
+        uint8_t _liveWaveform = 0;
+
+        uint8_t _waveformStepDivisions = 0;
+        */
 
         inline __attribute__((always_inline))
         uint16_t& timeCounter() {
@@ -146,6 +153,7 @@ namespace WaveformGen {
 
         inline __attribute__((always_inline))
         uint8_t& waveformStepDivisions() {
+            //return _waveformStepDivisions;
             return wgs.waveformStepDivisions;
         }
 
