@@ -86,11 +86,11 @@ uint8_t readWaveform(const uint8_t waveformIndex) {
 // -------- WAVEFORM GEN --------
 
 namespace WaveformGen {
-    typedef struct NoteInfo {
+    struct NoteInfo {
         uint8_t noteDivisions;
 
         uint8_t waveform;
-    } NoteInfo;
+    };
 
     inline __attribute__((always_inline))
     extern NoteInfo nextNoteSource();
@@ -231,14 +231,14 @@ namespace WaveformGen {
 
 // -------- INPUT HANDLER --------
 
-typedef enum InputBtn {
+enum InputBtn {
     InputButtonsCount =  4,
 
     InputBtnMode =  3,
     InputBtnMinus = 2,
     InputBtnClick = 1,
     InputBtnPlus =  0,
-} InputBtn;
+};
 
 class InputHandler {
 private:
