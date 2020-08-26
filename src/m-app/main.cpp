@@ -22,6 +22,8 @@ namespace divv {
     }
 }
 
+uint8_t __builtin_avr_swap(uint8_t);
+
 // ----------------
 
 // -------- NOTES DATA --------
@@ -47,6 +49,7 @@ const uint8_t NOTES_DIVISIONS[] PROGMEM = {
 
 const uint8_t NOTES_COUNT = sizeof(NOTES_DIVISIONS) / sizeof(uint8_t);
 
+inline __attribute__((always_inline))
 uint8_t readNoteDivisions(const uint8_t noteIndex) {
     divv::div(noteIndex, NOTES_COUNT);
     const uint8_t indexMod = divv::remainder;
@@ -71,6 +74,7 @@ const uint8_t WAVEFORMS[] PROGMEM = {
 
 const uint8_t WAVEFORMS_COUNT = sizeof(WAVEFORMS) / sizeof(uint8_t);
 
+inline __attribute__((always_inline))
 uint8_t readWaveform(const uint8_t waveformIndex) {
     divv::div(waveformIndex, WAVEFORMS_COUNT);
     const uint8_t indexMod = divv::remainder;
@@ -206,11 +210,6 @@ namespace WaveformGen {
         // enable compa & compb interrupts
         ACCESS_BYTE(TIMSK0) |= BIT_MASK(OCIE0A) | BIT_MASK(OCIE0B);
 
-        // clear any relevant pending interrupts and reset timer counter
-        // assuming we don't need those, and generator will be started exactly once
-        //ACCESS_BYTE(TIFR0) = BIT_MASK(OCF0B) | BIT_MASK(OCF0A) | BIT_MASK(TOV0);
-        //ACCESS_BYTE(TCNT0) = 0;
-
         timeCounter() = TIMER_COUNTS_PER_BEAT;
 
         // set pre-scaler to 1024 and start timer
@@ -311,12 +310,11 @@ public:
     }
 
     inline __attribute__((always_inline))
-    static void setLEDs(uint8_t val) {
-        setLEDs(
-            static_cast<uint8_t>(val >> 3u) & 1u,
-            static_cast<uint8_t>(val >> 2u) & 1u,
-            static_cast<uint8_t>(val >> 1u) & 1u,
-            static_cast<uint8_t>(val >> 0u) & 1u);
+    static void setLEDs(const uint8_t val) {
+        inputPlus::outputSet(val & 0b0001u);
+        inputClick::outputSet(val & 0b0010u);
+        inputMinus::outputSet(val & 0b0100u);
+        inputMode::outputSet(val & 0b1000u);
     }
 };
 
@@ -356,6 +354,7 @@ namespace ActiveNoteNotesSequence {
             InputHandler::setLEDs(true, false, true, false);
         }
 
+        inline __attribute__((always_inline))
         static WaveformGen::NoteInfo nextNote() {
             const uint8_t noteDivisions = readNoteDivisions(activeNoteIndex);
             const uint8_t noteWaveform = readWaveform(activeWaveformIndex);
@@ -394,6 +393,7 @@ namespace AutoNotesSequence {
             InputHandler::setLEDs(true, false, true, false);
         }
 
+        inline __attribute__((always_inline))
         static WaveformGen::NoteInfo nextNote() {
             const uint8_t noteDivisions = readNoteDivisions(activeNoteIndex++);
             const uint8_t noteWaveform = readWaveform(activeWaveformIndex);
@@ -458,24 +458,17 @@ namespace FlashMemoryMelody {
             InputHandler::setLEDs(true, false, true, false);
         }
 
+        inline __attribute__((always_inline))
         static WaveformGen::NoteInfo nextNote() {
-            const uint8_t point = readMelodyPoint(melodyNoteIndex / 2);
-            uint8_t noteDivisionsIndex;
+            uint8_t point = readMelodyPoint(melodyNoteIndex / 2);
             if (0 == melodyNoteIndex % 2) {
-                noteDivisionsIndex = (point >> 4u);
-            } else {
-                noteDivisionsIndex = point & 0b1111u;
+                point = __builtin_avr_swap(point);
             }
-            melodyNoteIndex++;
-
+            const uint8_t noteDivisionsIndex = point & 0b1111u;
+            melodyNoteIndex++; // funny thing, moving this line up or down increases code size
             const uint8_t noteDivisions = readNoteDivisions(noteDivisionsIndex);
             const uint8_t noteWaveform = noteDivisionsIndex > 0 ? readWaveform(activeWaveformIndex) : 0;
             return WaveformGen::NoteInfo { noteDivisions, noteWaveform };
-        }
-
-    private:
-        static void advanceWaveform() {
-            activeWaveformIndex++;
         }
     };
 }
@@ -549,7 +542,7 @@ namespace MainProtos {
     };
 }
 
-typedef Fooz::Logic MainLogic;
+typedef FlashMemoryMelody::Logic MainLogic;
 
 WaveformGen::NoteInfo WaveformGen::nextNoteSource() {
     return MainLogic::nextNote();
