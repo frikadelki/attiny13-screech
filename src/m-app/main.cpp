@@ -444,11 +444,7 @@ namespace FlashMemoryMelody {
 
 namespace Fooz {
     namespace {
-        const uint8_t BANK_SIZE = 16;
-
-        uint8_t bank[BANK_SIZE];
-
-        uint8_t activeNoteIndex = 10;
+        uint8_t activeNoteIndex = 0;
 
         uint8_t  activeWaveformIndex = 0;
     }
