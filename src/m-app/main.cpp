@@ -88,6 +88,7 @@ namespace WaveformGen {
         uint8_t waveform;
     } NoteInfo;
 
+    inline __attribute__((always_inline))
     extern NoteInfo nextNoteSource();
 
     void restartGenerator();
@@ -107,6 +108,8 @@ namespace WaveformGen {
             uint16_t timeCounter = 0;
 
             WaveformGen::NoteInfo activeNote = { 0, 0 };
+
+            uint8_t waveformStepDivisions = 0;
 
             uint8_t liveWaveform = 0;
         };
@@ -137,24 +140,9 @@ namespace WaveformGen {
             return wgs.liveWaveform;
         }
 
-        uint8_t waveformStepDivisions() {
-            return divv::div(activeNote().noteDivisions, WAVEFORM_LENGTH + 1);
-        }
-
-        void fetchNextNote() {
-            activeNote() = nextNoteSource();
-        }
-
         inline __attribute__((always_inline))
-        void primeTimers() {
-            ACCESS_BYTE(OCR0A) = activeNote().noteDivisions;
-            ACCESS_BYTE(OCR0B) = waveformStepDivisions();
-        }
-
-        void primeNextWavePeriod() {
-            blinkerPin::clear();
-            liveWaveform() = activeNote().waveform;
-            primeTimers();
+        uint8_t& waveformStepDivisions() {
+            return wgs.waveformStepDivisions;
         }
 
         inline __attribute__((always_inline))
@@ -163,6 +151,25 @@ namespace WaveformGen {
             liveWaveform() >>= 1u;
             blinkerPin::set(wfBit);
             ACCESS_BYTE(OCR0B) += waveformStepDivisions();
+        }
+
+        inline __attribute__((always_inline))
+        void fetchNextNote() {
+            activeNote() = nextNoteSource();
+            waveformStepDivisions() = divv::div(activeNote().noteDivisions, WAVEFORM_LENGTH + 1);
+        }
+
+        inline __attribute__((always_inline))
+        void primeTimers() {
+            ACCESS_BYTE(OCR0A) = activeNote().noteDivisions;
+            ACCESS_BYTE(OCR0B) = waveformStepDivisions();
+        }
+
+        inline __attribute__((always_inline))
+        void primeNextWavePeriod() {
+            blinkerPin::clear();
+            liveWaveform() = activeNote().waveform;
+            primeTimers();
         }
 
         inline __attribute__((always_inline))
@@ -477,7 +484,7 @@ namespace Fooz {
     namespace {
         uint8_t activeNoteIndex = 0;
 
-        uint8_t  activeWaveformIndex = 0;
+        uint8_t activeWaveformIndex = 0;
     }
 
     class Logic {
@@ -503,6 +510,7 @@ namespace Fooz {
             InputHandler::setLEDs(activeNoteIndex);
         }
 
+        inline __attribute__((always_inline))
         static WaveformGen::NoteInfo nextNote() {
             const uint8_t noteDivisions = readNoteDivisions(activeNoteIndex);
             const uint8_t noteWaveform = readWaveform(activeWaveformIndex);
