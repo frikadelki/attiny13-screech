@@ -423,7 +423,7 @@ namespace AutoNotesSequence {
             activeWaveformIndex++;
         }
     };
-};
+}
 
 namespace FlashMemoryMelody {
     namespace {
@@ -560,7 +560,7 @@ namespace MainProtos {
     };
 }
 
-typedef FlashMemoryMelody::Logic MainLogic;
+typedef Fooz::Logic MainLogic;
 
 WaveformGen::NoteInfo WaveformGen::nextNoteSource() {
     return MainLogic::nextNote();
