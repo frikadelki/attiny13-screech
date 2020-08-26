@@ -85,6 +85,7 @@ class WaveformGen {
 public:
     typedef struct NoteInfo {
         uint8_t noteDivisions;
+
         uint8_t waveform;
     } NoteInfo;
 
@@ -104,7 +105,7 @@ private:
 
         NoteInfo activeNote = { 0, 0 };
 
-        uint8_t waveformStep = 0;
+        uint8_t liveWaveform = 0;
     };
 
     typedef OutputPin<DDRB, PORTB, PINB, 0> blinkerPin;
@@ -123,7 +124,7 @@ private:
 
     static void primeNextWavePeriod() {
         blinkerPin::clear();
-        wgs.waveformStep = 0;
+        wgs.liveWaveform = wgs.activeNote.waveform;
         primeTimers();
     }
 
@@ -157,17 +158,10 @@ public:
 
     inline __attribute__((always_inline))
     static void onWaveStep() {
-        const bool wfBit = static_cast<uint8_t>(wgs.activeNote.waveform >> wgs.waveformStep) & 0b1u;
+        const bool wfBit = wgs.liveWaveform & 0b1u;
+        wgs.liveWaveform >>= 1u;
         blinkerPin::set(wfBit);
-
-        wgs.waveformStep++;
-        const uint8_t stepDivisions = waveformStepDivisions();
-        const uint8_t nextWaveformStepDivisions = ACCESS_BYTE(OCR0B) + (stepDivisions > 0 ? stepDivisions : 1);
-        const bool hasRemainingWaveformBits = wgs.waveformStep < WAVEFORM_LENGTH;
-        const bool hasRemainingDivisions = nextWaveformStepDivisions < wgs.activeNote.noteDivisions;
-        if (hasRemainingWaveformBits && hasRemainingDivisions) {
-            ACCESS_BYTE(OCR0B) = nextWaveformStepDivisions;
-        }
+        ACCESS_BYTE(OCR0B) += waveformStepDivisions();
     }
 
     inline __attribute__((always_inline))
