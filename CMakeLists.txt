@@ -22,7 +22,7 @@ project(ATTiny13Tests)
 
 set(SOURCES_DIR ${${PROJECT_NAME}_SOURCE_DIR})
 
-set(AVR_INCLUDES /usr/local/Cellar/avr-gcc/8.3.0/avr/include)
+set(AVR_INCLUDES /usr/local/Cellar/avr-gcc/9.3.0/avr/include)
 #set(AVR_INCLUDES /usr/local/CrossPack-AVR/avr/include)
 #set(AVR_INCLUDES /usr/lib/avr/include)
 
@@ -42,9 +42,12 @@ separate_arguments(SELF_INCLUDES)
 set(SOURCE_FILES
         src/m-toolbox/MissingCPP.h
         src/m-toolbox/MissingCPP.cpp
+        src/m-toolbox/AvrGccBuiltins.h
 
         src/m-toolbox/Macro.h
         src/m-toolbox/BitAccess.h
+        src/m-toolbox/Utils.h
+        src/m-toolbox/Utils.cpp
 
         src/m-toolbox/InputPin.h
         src/m-toolbox/OutputPin.h

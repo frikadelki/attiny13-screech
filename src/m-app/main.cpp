@@ -1,4 +1,6 @@
 
+#include "../m-toolbox/AvrGccBuiltins.h"
+
 #include "../m-toolbox/Macro.h"
 #include "../m-toolbox/ComboPin.h"
 #include "../m-toolbox/OutputPin.h"
@@ -22,14 +24,13 @@ namespace divv {
     }
 }
 
-uint8_t __builtin_avr_swap(uint8_t);
-
 // ----------------
 
 // -------- NOTES DATA --------
 
 const uint8_t NOTES_DIVISIONS[] PROGMEM = {
         255,
+
         200, 		//C6    //0x1
         193, 		//D6    //0x2
         185, 		//E6    //0x3
@@ -37,6 +38,7 @@ const uint8_t NOTES_DIVISIONS[] PROGMEM = {
         171, 		//G6    //0x5
         209, 		//A6    //0x6
         203, 		//B6    //0x7
+
         143, 		//C7    //0x8
         129, 		//D7    //0x9
         113, 		//E7    //0xA
@@ -44,6 +46,7 @@ const uint8_t NOTES_DIVISIONS[] PROGMEM = {
         86, 		//G7    //0xC
         161, 		//A7    //0xD
         149, 		//B7    //0xE
+
         255
 };
 
@@ -90,6 +93,8 @@ namespace WaveformGen {
         uint8_t noteDivisions;
 
         uint8_t waveform;
+
+        uint8_t bend;
     };
 
     inline __attribute__((always_inline))
@@ -111,17 +116,19 @@ namespace WaveformGen {
         struct WaveformGeneratorState {
             uint16_t timeCounter = 0;
 
-            WaveformGen::NoteInfo activeNote = { 0, 0 };
+            WaveformGen::NoteInfo activeNote = { 0, 0, 0 };
 
             uint8_t waveformStepDivisions = 0;
 
             uint8_t liveWaveform = 0;
+
+            uint8_t divider = 0;
         };
 
         WaveformGeneratorState wgs;
 
         // this is weird, compilation produces different code
-        // depending if data is "packed" or "flat
+        // depending if data is "packed" or "flat"
         // seems to be affected by members in the struct too
         /*
         uint16_t _timeCounter = 0;
@@ -160,8 +167,8 @@ namespace WaveformGen {
         inline __attribute__((always_inline))
         void onWaveStep() {
             const bool wfBit = liveWaveform() & 0b1u;
-            liveWaveform() >>= 1u;
             blinkerPin::set(wfBit);
+            liveWaveform() >>= 1u; // funny thing, moving this line changes code size
             ACCESS_BYTE(OCR0B) += waveformStepDivisions();
         }
 
@@ -182,6 +189,16 @@ namespace WaveformGen {
             blinkerPin::clear();
             liveWaveform() = activeNote().waveform;
             primeTimers();
+            uint8_t bend = activeNote().bend & 0b11u;
+            wgs.divider++;
+            if (0 == wgs.divider % 2) {
+                if (bend & 0b10u) {
+                    bend = ~bend + 1;
+                    activeNote().noteDivisions -= 5 * bend;
+                } else {
+                    activeNote().noteDivisions += 5 * bend;
+                }
+            }
         }
 
         inline __attribute__((always_inline))
@@ -309,7 +326,7 @@ namespace UIDriver {
         pinMinus::inputPrime();
         pinClick::inputPrime();
         pinPlus::inputPrime();
-        comboPinWaitInputSettle();
+        ComboPinWaitInputSettle();
         filterButton(pinMode::inputRead(), InputBtnMode);
         filterButton(pinMinus::inputRead(), InputBtnMinus);
         filterButton(pinClick::inputRead(), InputBtnClick);
@@ -347,6 +364,8 @@ namespace ActiveNoteNotesSequence {
         uint8_t activeNoteIndex = 0;
 
         uint8_t  activeWaveformIndex = 0;
+
+        uint8_t bend = 0;
     }
 
     class Logic {
@@ -358,25 +377,25 @@ namespace ActiveNoteNotesSequence {
         inline __attribute__((always_inline))
         static void onCycle() {
             if (UIDriver::isRisingEdge(UIDriver::InputBtnMode)) {
-                activeNoteIndex--;
+                bend--;
             }
             if (UIDriver::isRisingEdge(UIDriver::InputBtnMinus)) {
                 activeNoteIndex++;
             }
             if (UIDriver::isRisingEdge(UIDriver::InputBtnClick)) {
-                activeWaveformIndex--;
+                bend++;
             }
             if (UIDriver::isRisingEdge(UIDriver::InputBtnPlus)) {
                 activeWaveformIndex++;
             }
-            UIDriver::setLEDs(true, false, true, false);
+            UIDriver::setLEDs(activeNoteIndex);
         }
 
         inline __attribute__((always_inline))
         static WaveformGen::NoteInfo nextNote() {
             const uint8_t noteDivisions = readNoteDivisions(activeNoteIndex);
             const uint8_t noteWaveform = readWaveform(activeWaveformIndex);
-            return WaveformGen::NoteInfo { noteDivisions, noteWaveform };
+            return WaveformGen::NoteInfo { noteDivisions, noteWaveform, bend };
         }
     };
 }
@@ -386,6 +405,8 @@ namespace AutoNotesSequence {
         uint8_t activeNoteIndex = 0;
 
         uint8_t  activeWaveformIndex = 0;
+
+        uint8_t bend = 0;
     }
 
     class Logic {
@@ -397,30 +418,25 @@ namespace AutoNotesSequence {
         inline __attribute__((always_inline))
         static void onCycle() {
             if (UIDriver::isRisingEdge(UIDriver::InputBtnMode)) {
-                advanceWaveform();
+                bend--;
             }
             if (UIDriver::isRisingEdge(UIDriver::InputBtnMinus)) {
-                advanceWaveform();
+                activeWaveformIndex--;
             }
             if (UIDriver::isRisingEdge(UIDriver::InputBtnClick)) {
-                advanceWaveform();
+                bend++;
             }
             if (UIDriver::isRisingEdge(UIDriver::InputBtnPlus)) {
-                advanceWaveform();
+                activeWaveformIndex++;
             }
-            UIDriver::setLEDs(true, false, true, false);
+            UIDriver::setLEDs(activeNoteIndex);
         }
 
         inline __attribute__((always_inline))
         static WaveformGen::NoteInfo nextNote() {
             const uint8_t noteDivisions = readNoteDivisions(activeNoteIndex++);
             const uint8_t noteWaveform = readWaveform(activeWaveformIndex);
-            return WaveformGen::NoteInfo { noteDivisions, noteWaveform };
-        }
-
-    private:
-        static void advanceWaveform() {
-            activeWaveformIndex++;
+            return WaveformGen::NoteInfo { noteDivisions, noteWaveform, bend };
         }
     };
 }
@@ -451,7 +467,11 @@ namespace FlashMemoryMelody {
     namespace {
         uint8_t melodyNoteIndex = 0;
 
+        uint8_t lastNoteDivisionsIndex = 0;
+
         uint8_t activeWaveformIndex = 0;
+
+        uint8_t bend = false;
     }
 
     class Logic {
@@ -463,17 +483,18 @@ namespace FlashMemoryMelody {
         inline __attribute__((always_inline))
         static void onCycle() {
             if (UIDriver::isRisingEdge(UIDriver::InputBtnMode)) {
-                melodyNoteIndex = 0;
+                bend--;
             }
             if (UIDriver::isRisingEdge(UIDriver::InputBtnMinus)) {
+                activeWaveformIndex--;
             }
             if (UIDriver::isRisingEdge(UIDriver::InputBtnClick)) {
-                activeWaveformIndex--;
+                bend++;
             }
             if (UIDriver::isRisingEdge(UIDriver::InputBtnPlus)) {
                 activeWaveformIndex++;
             }
-            UIDriver::setLEDs(true, false, true, false);
+            UIDriver::setLEDs(lastNoteDivisionsIndex);
         }
 
         inline __attribute__((always_inline))
@@ -482,11 +503,11 @@ namespace FlashMemoryMelody {
             if (0 == melodyNoteIndex % 2) {
                 point = __builtin_avr_swap(point);
             }
-            const uint8_t noteDivisionsIndex = point & 0b1111u;
+            lastNoteDivisionsIndex = point & 0b1111u;
             melodyNoteIndex++; // funny thing, moving this line up or down increases code size
-            const uint8_t noteDivisions = readNoteDivisions(noteDivisionsIndex);
-            const uint8_t noteWaveform = noteDivisionsIndex > 0 ? readWaveform(activeWaveformIndex) : 0;
-            return WaveformGen::NoteInfo { noteDivisions, noteWaveform };
+            const uint8_t noteDivisions = readNoteDivisions(lastNoteDivisionsIndex);
+            const uint8_t noteWaveform = lastNoteDivisionsIndex > 0 ? readWaveform(activeWaveformIndex) : 0;
+            return WaveformGen::NoteInfo { noteDivisions, noteWaveform, bend };
         }
     };
 }
@@ -496,6 +517,8 @@ namespace Fooz {
         uint8_t activeNoteIndex = 0;
 
         uint8_t activeWaveformIndex = 0;
+
+        uint8_t bend = 0;
     }
 
     class Logic {
@@ -507,16 +530,16 @@ namespace Fooz {
         inline __attribute__((always_inline))
         static void onCycle() {
             if (UIDriver::isRisingEdge(UIDriver::InputBtnMode)) {
-                activeNoteIndex--;
+                bend++;
             }
             if (UIDriver::isRisingEdge(UIDriver::InputBtnMinus)) {
-                activeNoteIndex++;
+                activeNoteIndex--;
             }
             if (UIDriver::isRisingEdge(UIDriver::InputBtnClick)) {
-                activeWaveformIndex--;
+                activeWaveformIndex++;
             }
             if (UIDriver::isRisingEdge(UIDriver::InputBtnPlus)) {
-                activeWaveformIndex++;
+                activeNoteIndex++;
             }
             UIDriver::setLEDs(activeNoteIndex);
         }
@@ -525,7 +548,7 @@ namespace Fooz {
         static WaveformGen::NoteInfo nextNote() {
             const uint8_t noteDivisions = readNoteDivisions(activeNoteIndex);
             const uint8_t noteWaveform = readWaveform(activeWaveformIndex);
-            return WaveformGen::NoteInfo { noteDivisions, noteWaveform };
+            return WaveformGen::NoteInfo { noteDivisions, noteWaveform, bend };
         }
     };
 }
@@ -590,6 +613,8 @@ private:
     static void cycle() {
         UIDriver::pollInputs();
         MainLogic::onCycle();
+        fixedDelayLong();
+        fixedDelayLong();
     }
 };
 

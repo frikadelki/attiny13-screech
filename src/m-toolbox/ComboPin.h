@@ -2,8 +2,7 @@
 #define MTBX_COMBO_PIN_H
 
 #include "BitAccess.h"
-
-
+#include "Utils.h"
 
 // this assumes the following setup
 /*
@@ -93,11 +92,9 @@ private:
     }
 };
 
-__attribute__((noinline))
-void comboPinWaitInputSettle() {
-    for (uint8_t i = 0; i < 16; i++) {
-        __asm__ __volatile__ ("nop");
-    }
+__attribute__((always_inline))
+void ComboPinWaitInputSettle() {
+    fixedDelayLong();
 }
 
 #endif // MTBX_COMBO_PIN_H
